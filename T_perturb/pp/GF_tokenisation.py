@@ -76,7 +76,7 @@ def get_args():
     parser.add_argument(
         '--pairing_mode',
         type=str,
-        default='random',
+        default='stratified',
         # default='random',
         choices=['stratified', 'random'],
         help='Cell pairing mode',
@@ -84,7 +84,7 @@ def get_args():
     parser.add_argument(
         '--nproc',
         type=int,
-        default=32,
+        default=1,
         help='Number of processes to use for tokenisation',
     )
     parser.add_argument(
@@ -172,9 +172,10 @@ else:
 # filter adata for only genes occuring in the token dictionary
 (adata_subset, token_id_to_row_id_dict, row_id_to_gene_name) = tokenid_mapping(
     adata,
-    './generative_modelling_omic/Geneformer/geneformer/token_dictionary.pkl',
+    './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
     exclude_non_GF_genes=True,
 )
+
 # save mapping dictionnary
 with open(
     f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
@@ -208,9 +209,9 @@ adata_subset.obs['n_counts'] = adata_subset.X.sum(axis=1)
 if not isinstance(adata_subset.X, csr_matrix):
     adata_subset.X = csr_matrix(adata_subset.X)
 
-# adata_subset.write_h5ad(
-#     f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
-# )
+adata_subset.write_h5ad(
+    f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
+)
 
 print('Finished preprocessing adata.')
 print('Start tokenisation of adata...')
@@ -221,13 +222,20 @@ output_dir = (
     f'/dataset_{args.gene_filtering_mode}'
 )
 var_to_keep: Dict[str, str] = {v: v for v in args.var_list}.copy()
-tk = TranscriptomeTokenizer(var_to_keep, nproc=args.nproc)
+tk = TranscriptomeTokenizer(
+    custom_attr_name_dict=var_to_keep,
+    nproc=16,
+    model_input_size=4096,
+    special_token=True,
+)
+# time it
 tk.tokenize_data(
-    input_dir,  # input directory - all h5ad files in this directory will be tokenised
-    output_dir,  # output directory - tokenised h5ad files will be saved here
-    f'{args.dataset}_{args.gene_filtering_mode}',  # name of output file
+    data_directory=input_dir,
+    output_directory=output_dir,
+    output_prefix=f'{args.dataset}_{args.gene_filtering_mode}',  # name of output file
     file_format='h5ad',  # format [loom, h5ad]
 )
+
 print('Finished tokenisation.')
 # ---------------- Cell pairing and save adata/dataset by time point ----------------
 # filter and save dataset by time point
@@ -265,10 +273,10 @@ for time_point in tqdm.tqdm(args.time_point_order):
     # subset adata by cell pairings
     adata_tmp = subset_adata(adata_subset, cell_pairings[time_point])
     # separate src and target directory
-    src_adata_dir = f'{paired_h5ad_dir}_src_random_pairing'
-    tgt_adata_dir = f'{paired_h5ad_dir}_tgt_random_pairing'
-    src_dataset_dir = f'{output_dir}_src_random_pairing'
-    tgt_dataset_dir = f'{output_dir}_tgt_random_pairing'
+    src_adata_dir = f'{paired_h5ad_dir}_src_random_pairing_4096'
+    tgt_adata_dir = f'{paired_h5ad_dir}_tgt_random_pairing_4096'
+    src_dataset_dir = f'{output_dir}_src_random_pairing_4096'
+    tgt_dataset_dir = f'{output_dir}_tgt_random_pairing_4096'
     if not os.path.exists(src_adata_dir):
         os.makedirs(src_adata_dir)
     if not os.path.exists(tgt_adata_dir):

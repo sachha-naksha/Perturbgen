@@ -374,7 +374,7 @@ def main() -> None:
     if args.test_mode == 'masking':
         pretrained_module = CellGenTrainer(
             tgt_vocab_size=args.tgt_vocab_size,
-            d_model=256,
+            d_model=512,
             num_heads=8,
             num_layers=args.num_layers,
             d_ff=args.d_ff,
@@ -400,7 +400,7 @@ def main() -> None:
             ckpt_masking_path=args.ckpt_masking_path,
             ckpt_count_path=args.ckpt_count_path,
             tgt_vocab_size=args.tgt_vocab_size,
-            d_model=256,
+            d_model=512,
             num_heads=8,
             num_layers=args.num_layers,
             d_ff=args.d_ff,
@@ -500,12 +500,24 @@ def main() -> None:
     # further information.
     # Lightning allows for simple multi-gpu training, gradient accumulation, half
     # precision training, etc. using the trainer class.
+
+    print('Using device {}.'.format(accelerator))
+    # deepspeed_strategy = DeepSpeedStrategy(
+    #     stage=2,
+    # )
+    if torch.cuda.is_available():
+        cuda_device_name = torch.cuda.get_device_name()
+    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+        print(f'Using {cuda_device_name} for training')
+        precision = 'bf16-mixed'
+    else:
+        precision = '16-mixed'
     trainer = pl.Trainer(
         logger=wandb_logger,
         callbacks=[TQDMProgressBar(refresh_rate=10)],
         accelerator=accelerator,
         devices=1 if torch.cuda.is_available() else 0,  # inference only on one gpu
-        limit_test_batches=500.0,
+        precision=precision,
     )
     # Finally, kick of the training process.
     if args.test_mode == 'masking':

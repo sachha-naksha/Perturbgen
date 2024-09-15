@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 import pickle
+import re
 from pathlib import Path
 from typing import Dict, List
 
@@ -330,9 +331,20 @@ def tokenid_mapping(
         print(f'Number of genes dropped: {adata.n_vars - adata_subset.n_vars}')
     else:
         adata_subset = adata.copy()
-    # print number of genes dropped
-    print(f'Number of genes dropped: {adata.n_vars - adata_subset.n_vars}')
-    adata_subset.var['row_id'] = np.arange(adata_subset.n_vars) + 1
+    # keep special tokens and do not assign row_id
+    pattern = re.compile(r'<[a-zA-Z]+>')
+    special_tokens = [s for s in token_id_dict.keys() if pattern.match(s)]
+    special_tokens_dict = {
+        key: value for key, value in token_id_dict.items() if key in special_tokens
+    }
+    # create row_id for special tokens and exclude special tokens from row_id
+    row_id = np.arange(adata_subset.n_vars + len(special_tokens))
+    map_special_tokens = dict(
+        zip(special_tokens_dict.values(), special_tokens_dict.values())
+    )
+    row_id = row_id[~np.isin(row_id, list(special_tokens_dict.values()))]
+    print(row_id)
+    adata_subset.var['row_id'] = row_id
     # create dictionary to map token_id to row_id
     token_id_to_row_id_dict = dict(
         zip(
@@ -340,11 +352,14 @@ def tokenid_mapping(
             adata_subset.var['row_id'].values,
         )
     )
-    token_id_to_row_id_dict[0] = 0
+    # add token_id_row_id_dict for special tokens
+    token_id_to_row_id_dict.update(map_special_tokens)
     # create dictionary to map row_id to gene_name
     row_id_to_gene_name = dict(
         zip(adata_subset.var['row_id'], adata_subset.var['gene_name'])
     )
+    special_tokens_dict = {value: key for key, value in special_tokens_dict.items()}
+    row_id_to_gene_name.update(special_tokens_dict)
     return (adata_subset, token_id_to_row_id_dict, row_id_to_gene_name)
 
 
@@ -361,7 +376,9 @@ def subset_adata(adata, cell_pairings):
     # check if obs index is not range index
     if adata_.obs.index.dtype != 'int64':
         adata_.obs = adata_.obs.reset_index()
-    df = pd.DataFrame(adata_.X.A, index=adata_.obs.index, columns=adata_.var.index)
+    df = pd.DataFrame(
+        adata_.X.toarray(), index=adata_.obs.index, columns=adata_.var.index
+    )
     # use row index instead of index
     df.reset_index(drop=True, inplace=True)
     subset_df = df.loc[cell_pairings]

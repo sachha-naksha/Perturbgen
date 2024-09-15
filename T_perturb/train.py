@@ -382,7 +382,7 @@ def main() -> None:
         pretrained_module = CellGenTrainer(
             # tgt_vocab_size=1820,  # 704 for degs, 1820 for tokenised
             tgt_vocab_size=args.tgt_vocab_size,  # max token id + 1 for padding
-            d_model=256,
+            d_model=512,
             num_heads=8,
             num_layers=args.num_layers,
             d_ff=args.d_ff,
@@ -405,7 +405,7 @@ def main() -> None:
             ckpt_masking_path=args.ckpt_masking_path,
             ckpt_count_path=None,
             tgt_vocab_size=args.tgt_vocab_size,
-            d_model=256,
+            d_model=512,
             num_heads=8,
             num_layers=args.num_layers,
             d_ff=args.d_ff,
@@ -428,6 +428,7 @@ def main() -> None:
             mode=args.mode,
             seed=args.seed,
             context_mode=args.context_mode,
+            n_genes=tgt_adata_tmp.X.shape[1],
         )
     else:
         raise ValueError('train_mode not recognised, needs to be masking or count')
@@ -518,7 +519,7 @@ def main() -> None:
             monitor_metric = 'train/mse'
             mode = 'min'
 
-    checkpoint_path = './T_perturb/T_perturb/Model/checkpoints'
+    checkpoint_path = os.path.join(args.output_dir, 'checkpoints')
     checkpoint_callback = ModelCheckpoint(
         dirpath=checkpoint_path,
         filename=f'{filename}-' + '{epoch:02d}',
@@ -566,6 +567,15 @@ def main() -> None:
     # deepspeed_strategy = DeepSpeedStrategy(
     #     stage=2,
     # )
+    if torch.cuda.is_available():
+        cuda_device_name = torch.cuda.get_device_name()
+    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+        print(f'Using {cuda_device_name} for training')
+        precision = 'bf16-mixed'
+    else:
+        precision = '16-mixed'
+
+    # If the device is an A100, set the precision for matrix multiplication
     ddp_strategy = DDPStrategy(find_unused_parameters=True)
     trainer = pl.Trainer(
         logger=wandb_logger,
@@ -578,6 +588,7 @@ def main() -> None:
         accelerator='auto',
         devices=-1 if torch.cuda.is_available() else 0,
         strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
+        precision=precision,
     )
     print('Starting training...')
     if os.getcwd().split('/')[-1] != 'healthy_imm_expr':

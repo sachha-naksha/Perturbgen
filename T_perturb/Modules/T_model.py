@@ -15,6 +15,8 @@ import torch
 from einops import rearrange, repeat
 from torch import einsum, nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from torch.nn.attention import SDPBackend, sdpa_kernel
+from torch.nn.functional import scaled_dot_product_attention
 from tqdm import tqdm
 from transformers import BertForMaskedLM
 
@@ -53,6 +55,55 @@ from T_perturb.src.utils import (
 
 #     def forward(self, x):
 #         return drop_path(x, self.drop_prob, self.training)
+
+
+class DiscretePositionalEncoding(nn.Module):
+    def __init__(self, d_model, total_time_points, position_mode='sinusoidal'):
+        '''
+        Description:
+        ------------
+        Positional encoding for the transformer model.
+        Parameters:
+        -----------
+        d_model: `int`
+            Token embedding dimension.
+        max_seq_length: `int`
+            Maximum sequence length.
+        n_time_steps: `int`
+            Number of time steps for training.
+        Returns:
+        --------
+        x: `torch.Tensor`
+            Positional embeddings.
+        '''
+        super(DiscretePositionalEncoding, self).__init__()
+        self.total_time_points = total_time_points
+        if position_mode == 'learnt':
+            self.position_embeddings = nn.Embedding(total_time_points, d_model)
+        elif position_mode == 'sinusoidal':
+            pe = torch.zeros(total_time_points, d_model)
+            position = torch.arange(0, total_time_points, dtype=torch.float).unsqueeze(
+                1
+            )
+            div_term = torch.exp(
+                torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+            )
+            pe[:, 0::2] = torch.sin(position * div_term)
+            pe[:, 1::2] = torch.cos(position * div_term)
+            self.register_buffer('pe', pe.unsqueeze(0))
+        self.position_mode = position_mode
+
+    def forward(self, x, tgt_time_step):
+        if self.position_mode == 'learnt':
+            pe = self.position_embeddings.weight[tgt_time_step - 1]
+            pe = pe.unsqueeze(0).unsqueeze(0)
+            return x + pe
+        else:
+            pe = self.pe[:, tgt_time_step - 1]  # -1 to start from 0
+            pe = pe.expand(x.size(0), -1, -1)
+        return x + pe
+
+
 class SinusoidalPositionalEncoding(nn.Module):
     def __init__(self, d_model, max_seq_length, n_time_steps, mode='GF_fine_tuned'):
         '''
@@ -173,6 +224,7 @@ class CrossAttention(nn.Module):
         Cross attention module for transformer model with two options:
         - self attention: context_dim is None
         - cross attention: context_dim is not None
+
         Parameters:
         -----------
         query_dim: `int`
@@ -199,13 +251,7 @@ class CrossAttention(nn.Module):
             nn.Linear(inner_dim, query_dim), nn.Dropout(dropout)  # projection head
         )
 
-    def forward(self, x, context=None, mask=None):
-        h = self.num_heads
-        q = self.to_q(x)
-        if context is None:
-            context = x
-        k = self.to_k(context)
-        v = self.to_v(context)
+    def normal_attention(self, q, k, v, h, mask=None):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
         sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
         if mask is not None:
@@ -213,21 +259,57 @@ class CrossAttention(nn.Module):
             max_neg_value = -torch.finfo(sim.dtype).max
             mask = repeat(mask, 'b j -> (b h) () j', h=h)
             sim.masked_fill_(mask, max_neg_value)
-
-        # attention, what we cannot get enough of
         attn = sim.softmax(dim=-1)
-        # if attn.shape[2] == 301:
-        #     print(attn.shape)
-        #     print(
-        #         'sum of score',
-        #         torch.sum(attn.reshape(64,8,301,301)[0,0,:,:], axis=0)
-        #         )
-        #     print(
-        #         'attention matrix',
-        #         attn.reshape(64,8,301,301)[0,0,:5,:5]
-        #         )
         out = einsum('b i j, b j d -> b i d', attn, v)
         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
+        return out
+
+    def sdpa_attention(self, q, k, v, h, mask=None):
+        _, seq_len_q, _ = q.shape
+        _, seq_len_k, _ = k.shape
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=h), (q, k, v))
+        if mask is not None:
+            # Expand the mask to match the target shape:
+            # [batch_size, num_heads, seq_len, seq_len]
+            mask = mask.unsqueeze(1).unsqueeze(2)
+            mask = mask.expand(-1, h, seq_len_q, seq_len_k)
+            # negate mask so that padding tokens=False
+            mask = ~mask
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
+            out = scaled_dot_product_attention(
+                query=q,
+                key=k,
+                value=v,
+                attn_mask=mask,
+                is_causal=False,
+            )
+        out = rearrange(out, ' b h n d -> b n (h d)', h=h)
+        return out
+
+    def forward(
+        self,
+        x,
+        context=None,
+        mask=None,
+        attention_mode='sdpa',
+        precision=torch.bfloat16,
+    ):
+        x = x.to(precision)
+        h = self.num_heads
+        q = self.to_q(x)
+        if context is None:
+            context = x
+        k = self.to_k(context)
+        v = self.to_v(context)
+        if (x.dtype == torch.float16) or (x.dtype == torch.bfloat16):
+            if attention_mode == 'normal':
+                out = self.normal_attention(q, k, v, h, mask)
+            elif attention_mode == 'sdpa':
+                out = self.sdpa_attention(q, k, v, h, mask)
+            else:
+                raise ValueError(f'Invalid attention mode: {attention_mode}')
+        else:
+            out = self.normal_attention(q, k, v, h, mask)
         return self.to_out(out)
 
 
@@ -291,10 +373,14 @@ class Block(nn.Module):
         )  # add hidden size
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, src_mask=None, tgt_mask=None, enc_output=None):
-        attn_output = self.self_attn(x, mask=tgt_mask)
+    def forward(
+        self, x, src_mask=None, tgt_mask=None, enc_output=None, precision=torch.bfloat16
+    ):
+        attn_output = self.self_attn(x, mask=tgt_mask, precision=precision)
         x = self.norm1(x + self.dropout(attn_output))
-        attn_output = self.cross_attn(x, context=enc_output, mask=src_mask)
+        attn_output = self.cross_attn(
+            x, context=enc_output, mask=src_mask, precision=precision
+        )
         x = self.norm2(x + self.dropout(attn_output))  # disabled residual connection
         ff_output = self.feed_forward(x)
         x = self.norm3(x + self.dropout(ff_output))
@@ -306,7 +392,7 @@ class Geneformerwrapper(nn.Module):
     def __init__(
         self,
         model_path='/lustre/scratch123/hgi/projects/healthy_imm_expr/'
-        't_generative/T_perturb/Geneformer/',
+        't_generative/T_perturb/Geneformer/gf-12L-95M-i4096',
         output_attentions=False,
         output_hidden_states=True,
         mode='GF_frozen',
@@ -492,10 +578,14 @@ class CellGen(nn.Module):
         max_seq_length: int = 2048,
         dropout: float = 0.0,
         mlm_probability: float = 0.3,
-        time_steps: List[int] = [1, 2, 3],
+        time_steps: List[int] = [
+            1,
+            2,
+            3,
+        ],
         total_time_steps: int = 3,
         mode='GF_frozen',
-        position_embedding: Literal['sinusoidal', 'learnt'] = 'sinusoidal',
+        position_embedding: Literal['sinusoidal', 'learnt'] = 'learnt',
     ):
         '''
         Description:
@@ -540,6 +630,12 @@ class CellGen(nn.Module):
             - 'mean_embedding': Mean embeddings for non-padding tokens.
         '''
         super(CellGen, self).__init__()
+        if torch.cuda.is_available():
+            cuda_device_name = torch.cuda.get_device_name()
+        if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+            self.precision = torch.bfloat16
+        else:
+            self.precision = torch.float32
         self.num_features = self.embed_dim = d_model
         self.mlm_probability = mlm_probability
         self.tgt_vocab_size = tgt_vocab_size
@@ -549,15 +645,11 @@ class CellGen(nn.Module):
         self.d_ff = d_ff
         self.max_seq_length = max_seq_length
         self.dropout = dropout
-
-        total_vocab_size = (
-            tgt_vocab_size + total_time_steps
-        )  # add one for each cls token
         self.time_steps = time_steps
         self.total_time_steps = list(range(1, total_time_steps + 1))
-        self.mask_token = total_vocab_size
-        total_vocab_size = total_vocab_size + 1  # add one for padding token
-        self.token_embedding = nn.Embedding(total_vocab_size, d_model, padding_idx=0)
+        self.mask_token = 1
+        # total_vocab_size = total_vocab_size + 1  # add one for padding token
+        self.token_embedding = nn.Embedding(tgt_vocab_size, d_model, padding_idx=0)
         self.position_embedding = position_embedding
         if position_embedding == 'sinusoidal':
             self.positional_encoding = SinusoidalPositionalEncoding(
@@ -571,13 +663,17 @@ class CellGen(nn.Module):
                 d_model=d_model,
                 max_seq_length=max_seq_length,
             )
+            self.time_positional_encoding = DiscretePositionalEncoding(
+                d_model=d_model,
+                total_time_points=total_time_steps,
+            )
         else:
             raise ValueError(f'Invalid position embedding: {position_embedding}')
         if mode in ['GF_frozen', 'GF_fine_tuned']:
             self.encoder_layers = Geneformerwrapper(mode=mode)
         elif mode == 'Transformer_encoder':
             self.encoder_layers = Encoder(
-                total_vocab_size=total_vocab_size,
+                total_vocab_size=tgt_vocab_size,
                 max_seq_length=max_seq_length,
                 n_time_steps=total_time_steps,
                 d_model=d_model,
@@ -724,6 +820,7 @@ class CellGen(nn.Module):
                 src_mask=src_attention_mask,
                 tgt_mask=tgt_pad,
                 enc_output=enc_output,
+                precision=self.precision,
             )
             t += 1
         # :TODO rewrite this part logits not needed for running the other timepoints
@@ -775,6 +872,9 @@ class CellGen(nn.Module):
                         )
                     elif self.position_embedding == 'learnt':
                         dec_embedding = self.positional_encoding(tgt_embedding)
+                        dec_embedding = self.time_positional_encoding(
+                            dec_embedding, time_step
+                        )
                     # create context for the ones before the selected time step
                     # pad the rest
                     dec_outputs = self.call_decoder(
@@ -849,6 +949,7 @@ class CellGen(nn.Module):
                 tgt_input_id_dict,
                 self.time_steps,
             )
+
         else:
             tgt_pad_dict = generate_pad_dict
         src_attention_mask = generate_pad(src_input_id)
@@ -887,6 +988,9 @@ class CellGen(nn.Module):
                     )
                 elif self.position_embedding == 'learnt':
                     tgt_embedding = self.positional_encoding(tgt_embedding)
+                    tgt_embedding = self.time_positional_encoding(
+                        tgt_embedding, tgt_time_step
+                    )
                 # does not include any context
                 outputs = self.call_decoder(
                     enc_output=enc_output_,
@@ -957,6 +1061,9 @@ class CellGen(nn.Module):
                 tgt_embedding = self.positional_encoding(tgt_embedding, tgt_time_step)
             elif self.position_embedding == 'learnt':
                 tgt_embedding = self.positional_encoding(tgt_embedding)
+                tgt_embedding = self.time_positional_encoding(
+                    tgt_embedding, tgt_time_step
+                )
             outputs = self.call_decoder(
                 enc_output=enc_output,
                 src_attention_mask=src_attention_mask,
@@ -966,7 +1073,6 @@ class CellGen(nn.Module):
                 generate=generate,
                 labels=labels,
             )
-
         return outputs
 
 
@@ -974,7 +1080,7 @@ class CountHead(nn.Module):
     def __init__(
         self,
         loss_mode: str = 'zinb',
-        tgt_vocab_size: int = 25426,
+        n_genes: int = 25426,
         d_model: int = 256,
         dropout: float = 0.0,
     ):
@@ -1008,7 +1114,6 @@ class CountHead(nn.Module):
             hidden_features=d_model,
             drop=dropout,
         )
-        n_genes = tgt_vocab_size
         if self.loss_mode == 'mse':
             self.relu_output = nn.Sequential(nn.Linear(d_model, n_genes), nn.ReLU())
         elif self.loss_mode == 'zinb':
@@ -1048,6 +1153,7 @@ class CountDecoder(nn.Module):
         time_steps: list = [1, 2],
         total_time_steps: int = 3,
         context_mode: bool = True,
+        n_genes: int = 25426,
     ):
         '''
         Description:
@@ -1084,10 +1190,10 @@ class CountDecoder(nn.Module):
 
         self.loss_mode = loss_mode
         # exclude pad (-1) to get the number of genes
-        self.count_decoder = CountHead(loss_mode, tgt_vocab_size - 1, d_model, dropout)
-        total_vocab_size = tgt_vocab_size + total_time_steps  # add one for cls token
+
+        self.count_decoder = CountHead(loss_mode, n_genes, d_model, dropout)
         if add_mask_id:
-            self.mask_token = total_vocab_size
+            self.mask_token = 1
 
         self.time_steps = time_steps
         self.total_time_steps = list(range(1, total_time_steps + 1))

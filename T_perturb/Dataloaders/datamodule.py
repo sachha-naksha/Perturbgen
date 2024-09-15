@@ -299,7 +299,7 @@ class CellGenDataModule(LightningDataModule):
         src_counts = None
         if batch[0]['src_counts'] is not None:
             if isinstance(batch[0]['src_counts'], csr_matrix):
-                src_counts = [torch.tensor(d['src_counts'].A) for d in batch]
+                src_counts = [torch.tensor(d['src_counts'].toarray()) for d in batch]
 
             else:
                 src_counts = [torch.tensor(d['src_counts']) for d in batch]
@@ -322,11 +322,14 @@ class CellGenDataModule(LightningDataModule):
             if batch[0]['tgt_counts_t1'] is not None:
                 if isinstance(batch[0][f'tgt_counts_t{time_step}'], csr_matrix):
                     tgt_counts = [
-                        torch.tensor(d[f'tgt_counts_t{time_step}'].A) for d in batch
+                        torch.tensor(d[f'tgt_counts_t{time_step}'].toarray())
+                        for d in batch
                     ]
                     tgt_size_factor = [
                         torch.tensor(
-                            np.ravel(d[f'tgt_counts_t{time_step}'].A.sum(axis=1))
+                            np.ravel(
+                                d[f'tgt_counts_t{time_step}'].toarray().sum(axis=1)
+                            )
                         )
                         for d in batch
                     ]
