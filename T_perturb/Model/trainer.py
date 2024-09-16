@@ -133,7 +133,7 @@ class CellGenTrainer(LightningModule):
         # create directory if not exist
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
-        self.date = datetime.now().strftime('%Y%m%d')
+        self.date = datetime.now().strftime('%Y%m%d-%H:%M')
 
     def forward(self, batch):
         tgt_input_id_dict = {}
@@ -527,7 +527,7 @@ class CountDecoderTrainer(LightningModule):
         self.val_tgt_donor_list: List[str] = []
         self.mode = mode
         self.seed = seed
-        self.date = datetime.now().strftime('%Y%m%d')
+        self.date = datetime.now().strftime('%Y%m%d-%H:%M')
 
     def forward(self, batch):
         tgt_input_id_dict = {}
@@ -777,16 +777,7 @@ class CountDecoderTrainer(LightningModule):
     def test_step(self, batch, *args, **kwargs):
         tgt_input_id_dict = {}
         for i in range(1, self.total_time_steps + 1):
-            tgt_input_id_ = torch.cat(
-                (
-                    getattr(self, f'cls_token_{str(i)}').expand(
-                        batch[f'tgt_input_ids_t{i}'].shape[0], -1
-                    ),
-                    batch[f'tgt_input_ids_t{i}'],
-                ),
-                dim=1,
-            )
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = tgt_input_id_
+            tgt_input_id_dict[f'tgt_input_id_t{i}'] = batch[f'tgt_input_ids_t{i}']
         if self.generate:
             outputs = self.decoder.generate(
                 src_input_id=batch['src_input_ids'],

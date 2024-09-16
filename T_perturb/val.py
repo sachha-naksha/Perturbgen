@@ -426,6 +426,7 @@ def main() -> None:
             mode=args.mode,
             seed=args.seed,
             context_mode=args.context_mode,
+            n_genes=tgt_adata_tmp.X.shape[1],
         )
     else:
         raise ValueError('test_mode not recognised, needs to be masking or count')
