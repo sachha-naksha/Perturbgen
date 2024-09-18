@@ -21,23 +21,23 @@ export WANDB_DIR=$cwd/wandb
 # Run python script to train count decoder
 echo "--- Start computing model"
 
-# ----------------- Create folder to save results and copy the script -----------------
+# # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
 RES_NAME="cytoimmgen_extrapolation"
-# if directory does not exist, create it with the name $RES_NAME
-mkdir -p $RES_DIR/$RES_NAME
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# copy the current script to the result directory
-cp $0 $RES_DIR/$RES_NAME/3_run_train_count_GF_frozen_extrapolation_$TIMESTAMP.sh
-echo "Copying script to $RES_DIR/$RES_NAME/3_run_train_count_GF_frozen_extrapolation_$TIMESTAMP.sh"
+# # if directory does not exist, create it with the name $RES_NAME
+# mkdir -p $RES_DIR/$RES_NAME
+# # Get the current timestamp
+# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# # copy the current script to the result directory
+# cp $0 $RES_DIR/$RES_NAME/3_run_train_count_GF_frozen_extrapolation_$TIMESTAMP.sh
+# echo "Copying script to $RES_DIR/$RES_NAME/3_run_train_count_GF_frozen_extrapolation_$TIMESTAMP.sh"
 
 # ----------------- Extrapolation -----------------
 python3 $cwd/train.py \
 --train_mode count \
 --split False \
 --splitting_mode stratified \
---output_dir "./T_perturb/T_perturb/plt/res/cytoimmgen" \
+--output_dir $RES_DIR/$RES_NAME/res \
 --ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen_extrapolation/checkpoints/20240917_0722_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_256_mlmp_0.15_tp_1-2_s_42-epoch=49.ckpt" \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src_random_pairing_4096/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt_random_pairing_4096" \

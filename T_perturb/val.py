@@ -60,6 +60,16 @@ def get_args():
         choices=['random', 'stratified', 'unseen_cond'],
         help='splitting mode',
     )
+    parser.add_argument(
+        '--train_prop',
+        type=float,
+        default=0.8,
+    )
+    parser.add_argument(
+        '--test_prop',
+        type=float,
+        default=0.1,
+    )
     parser.add_argument('--split_obs', type=str, default='Donor')
     parser.add_argument('--split_value', type=str, default='D351')
     parser.add_argument(
@@ -250,8 +260,8 @@ def main() -> None:
             # start preprocessing to avoid loading anndata into datamodule
             train_indices, val_indices, test_indices = stratified_split(
                 tgt_adata=tgt_adata_tmp,
-                train_prop=0.8,  # 0.8,0.1,0.1 train, val, test
-                test_prop=0.1,
+                train_prop=args.train_prop,  # 0.8,0.1,0.1 train, val, test
+                test_prop=args.test_prop,
                 groups=['Cell_type', 'Donor'],
                 seed=args.seed,
             )
@@ -263,8 +273,8 @@ def main() -> None:
         elif args.splitting_mode == 'random':
             train_indices, val_indices, test_indices = randomised_split(
                 adata=tgt_adata_tmp,
-                train_prop=0.8,  # 0.8,0.1,0.1 train, val, test
-                test_prop=0.1,
+                train_prop=args.train_prop,  # 0.8,0.1,0.1 train, val, test
+                test_prop=args.test_prop,
                 seed=args.seed,
             )
         # elif split == 'unseen_donor':
@@ -303,6 +313,7 @@ def main() -> None:
         for _, tgt_adata in tgt_adatas.items():
             sc.pp.normalize_total(tgt_adata, target_sum=1e4)
             sc.pp.log1p(tgt_adata)
+
     # ZINB count loss preprocessing
     # ----------------------------------------------------------------------------------
 
@@ -502,7 +513,6 @@ def main() -> None:
     # Lightning allows for simple multi-gpu training, gradient accumulation, half
     # precision training, etc. using the trainer class.
 
-    print('Using device {}.'.format(accelerator))
     # deepspeed_strategy = DeepSpeedStrategy(
     #     stage=2,
     # )

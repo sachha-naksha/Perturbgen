@@ -57,91 +57,36 @@ from T_perturb.src.utils import (
 #         return drop_path(x, self.drop_prob, self.training)
 
 
-class DiscretePositionalEncoding(nn.Module):
-    def __init__(self, d_model, total_time_points, position_mode='sinusoidal'):
-        '''
-        Description:
-        ------------
-        Positional encoding for the transformer model.
-        Parameters:
-        -----------
-        d_model: `int`
-            Token embedding dimension.
-        max_seq_length: `int`
-            Maximum sequence length.
-        n_time_steps: `int`
-            Number of time steps for training.
-        Returns:
-        --------
-        x: `torch.Tensor`
-            Positional embeddings.
-        '''
-        super(DiscretePositionalEncoding, self).__init__()
-        self.total_time_points = total_time_points
-        if position_mode == 'learnt':
-            self.position_embeddings = nn.Embedding(total_time_points, d_model)
-        elif position_mode == 'sinusoidal':
-            pe = torch.zeros(total_time_points, d_model)
-            position = torch.arange(0, total_time_points, dtype=torch.float).unsqueeze(
-                1
-            )
-            div_term = torch.exp(
-                torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
-            )
-            pe[:, 0::2] = torch.sin(position * div_term)
-            pe[:, 1::2] = torch.cos(position * div_term)
-            self.register_buffer('pe', pe.unsqueeze(0))
-        self.position_mode = position_mode
-
-    def forward(self, x, tgt_time_step):
-        if self.position_mode == 'learnt':
-            pe = self.position_embeddings.weight[tgt_time_step - 1]
-            pe = pe.unsqueeze(0).unsqueeze(0)
-            return x + pe
-        else:
-            pe = self.pe[:, tgt_time_step - 1]  # -1 to start from 0
-            pe = pe.expand(x.size(0), -1, -1)
-        return x + pe
-
-
 class SinusoidalPositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_seq_length, n_time_steps, mode='GF_fine_tuned'):
+    def __init__(self, d_model: int, length: int):
         '''
         Description:
         ------------
         Positional encoding for the transformer model.
-        Two separate positional encodings are used, depending on the mode:
-        - Geneformer: BERT positional encoding is from pre-trained model.
-        - Transformer_encoder: Sinusoidal positional encoding is used.
+        Can be applied to distinguish between ranks and time steps.
+
         Parameters:
         -----------
         d_model: `int`
             Token embedding dimension.
-        max_seq_length: `int`
-            Maximum sequence length.
-        n_time_steps: `int`
-            Number of time steps for training.
-        mode: `str`
-            Mode of transformer encoder.
-            Options: ['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
+        length: `int`
+            Two options:
+            - encoding positional information of the gene ranking:
+                length = total_vocab_size
+            - encoding positional information of the time steps:
+                length = n_time_steps
+
         Returns:
         --------
         x: `torch.Tensor`
             Positional embeddings.
         '''
         # train time steps and interpolation timestep
-        # TODO: separate timestep positional encoding
-        # and positional encoding for the ranks
+        # TODO: Need to be changed if running the Encoder model
         super(SinusoidalPositionalEncoding, self).__init__()
-        self.max_seq_length = max_seq_length
-        if mode in ['GF_frozen', 'GF_fine_tuned']:
-            total_seq_length = n_time_steps * max_seq_length
-        elif mode == 'Transformer_encoder':
-            # add one time step to included src time step
-            total_seq_length = (n_time_steps + 1) * max_seq_length
-        self.mode = mode
-        pe = torch.zeros(total_seq_length, d_model)
-        position = torch.arange(0, total_seq_length, dtype=torch.float).unsqueeze(1)
+
+        pe = torch.zeros(length, d_model)
+        position = torch.arange(0, length, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
             torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
         )
@@ -150,17 +95,11 @@ class SinusoidalPositionalEncoding(nn.Module):
         self.register_buffer('pe', pe.unsqueeze(0))
 
     def forward(self, x, tgt_time_step=None):
-        if self.mode in ['GF_frozen', 'GF_fine_tuned']:
-            tgt_time_step_ = tgt_time_step - 1
-        elif self.mode == 'Transformer_encoder':
-            # start from 0 to include src time step
-            tgt_time_step_ = tgt_time_step
-        if tgt_time_step is not None:
-            start_pos = (tgt_time_step_) * self.max_seq_length
-            end_pos = start_pos + x.size(1)
-            pe = self.pe[:, start_pos:end_pos]
+        if tgt_time_step:
+            pe = self.pe[:, tgt_time_step - 1]  # -1 to start from 0
         else:
             pe = self.pe[:, : x.size(1)]
+        pe = pe.expand(x.size(0), -1, -1)
         return x + pe
 
 
@@ -330,6 +269,7 @@ class Block(nn.Module):
         ------------
         Transformer block with self attention and cross attention.
         Encoder output is used as context for cross attention.
+
         Parameters:
         -----------
         dim: `int`
@@ -401,6 +341,7 @@ class Geneformerwrapper(nn.Module):
         Description:
         ------------
         Wrapper for Geneformer model.
+
         Parameters:
         -----------
         model_path: `str`
@@ -487,18 +428,14 @@ class Encoder(nn.Module):
     ):
         super().__init__()
         self.position_embedding = position_embedding
-        if self.position_embedding == 'sinusoidal':
-            self.positional_encoding = SinusoidalPositionalEncoding(
-                d_model=d_model,
-                max_seq_length=max_seq_length,
-                n_time_steps=n_time_steps,
-                mode='Transformer_encoder',
-            )
-        elif self.position_embedding == 'learnt':
-            self.positional_encoding = LearntPositionalEncoding(
-                d_model=d_model,
-                max_seq_length=max_seq_length,
-            )
+        self.rank_positional_encoding = SinusoidalPositionalEncoding(
+            d_model=d_model,
+            length=max_seq_length,
+        )
+        self.time_positional_encoding = SinusoidalPositionalEncoding(
+            d_model=d_model,
+            length=n_time_steps,
+        )
         encoder_layers = TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
@@ -551,11 +488,8 @@ class Encoder(nn.Module):
         # [batch_size, seq_len, d_model] -> [seq_len, batch_size, d_model]
 
         src_embedding = self.token_embedding(src) * math.sqrt(self.d_model)
-        if self.position_embedding == 'sinusoidal':
-            src_embedding = self.positional_encoding(x=src_embedding, tgt_time_step=0)
-        elif self.position_embedding == 'learnt':
-            src_embedding = self.positional_encoding(x=src_embedding)
-        src_embedding = src_embedding.transpose(0, 1)
+        src_embedding = self.rank_positional_encoding(src_embedding)
+        src_embedding = self.time_positional_encoding(src_embedding, tgt_time_step=None)
         output = self.transformer_encoder(src_embedding, src_key_padding_mask=src_mask)
         # reverse transpose
         output = output.transpose(0, 1)
@@ -653,24 +587,16 @@ class CellGen(nn.Module):
         # total_vocab_size = total_vocab_size + 1  # add one for padding token
         self.token_embedding = nn.Embedding(total_vocab_size, d_model, padding_idx=0)
         self.position_embedding = position_embedding
-        if position_embedding == 'sinusoidal':
-            self.positional_encoding = SinusoidalPositionalEncoding(
-                d_model=d_model,
-                max_seq_length=max_seq_length,
-                n_time_steps=total_time_steps,
-                mode=mode,
-            )
-        elif position_embedding == 'learnt':
-            self.positional_encoding = LearntPositionalEncoding(
-                d_model=d_model,
-                max_seq_length=max_seq_length,
-            )
-            self.time_positional_encoding = DiscretePositionalEncoding(
-                d_model=d_model,
-                total_time_points=total_time_steps,
-            )
-        else:
-            raise ValueError(f'Invalid position embedding: {position_embedding}')
+
+        self.rank_positional_encoding = SinusoidalPositionalEncoding(
+            d_model=d_model,
+            length=max_seq_length,
+        )
+        self.time_positional_encoding = SinusoidalPositionalEncoding(
+            d_model=d_model,
+            length=total_time_steps,
+        )
+
         if mode in ['GF_frozen', 'GF_fine_tuned']:
             self.encoder_layers = Geneformerwrapper(mode=mode)
         elif mode == 'Transformer_encoder':
@@ -765,19 +691,23 @@ class CellGen(nn.Module):
             )
             tgt_input_id[indices_random] = random_tokens[indices_random]
         elif mask_mode == 'MASKGIT':
-            sample_length = torch.sum(~tgt_pad, dim=1)
+            # exclude CLS token, adapt the shape to sequence length-1
+            sample_length = torch.sum(~tgt_pad, dim=1) - 1
             batch, seq_len = tgt_input_id.shape
             rand_time = uniform((batch,), device=device)
             rand_mask_probs = noise_schedule(rand_time, method='cosine')
             num_token_masked = (
                 (torch.mul(sample_length, rand_mask_probs)).round().clamp(min=1)
             )
-            rand_int = torch.rand((batch, seq_len), device=device)
-            rand_int[tgt_pad] = 1
+            rand_int = torch.rand((batch, seq_len - 1), device=device)
+
+            rand_int[tgt_pad[:, 1:]] = 1
             batch_randperm = rand_int.argsort(dim=-1)
             mask = batch_randperm < rearrange(num_token_masked, 'b -> b 1')
-            # do not mask CLS token
-            mask[:, 0] = False
+            # concatenate CLS boolean mask
+            mask = torch.cat(
+                [torch.zeros((batch, 1), dtype=torch.bool, device=device), mask], dim=-1
+            )
             tgt_input_id[mask] = self.mask_token
             labels[~mask] = -100
         return tgt_input_id, labels
@@ -810,12 +740,9 @@ class CellGen(nn.Module):
         dec_embedding,
         tgt_pad,
         time_random,
-        generate=False,
         labels=None,
     ):
-        t = 0
         for dec_layer in self.decoder_block:
-            # print('decoder layer',t)
             # see if concatenation of cls embedding
             dec_embedding = dec_layer(
                 x=dec_embedding,
@@ -824,15 +751,14 @@ class CellGen(nn.Module):
                 enc_output=enc_output,
                 precision=self.precision,
             )
-            t += 1
         # :TODO rewrite this part logits not needed for running the other timepoints
-
         decoder_logits = self.decoder_fc(dec_embedding)
         outputs = {
             'dec_embedding': dec_embedding,
             'dec_logits': decoder_logits,
             'labels': labels,
             'selected_time_step': time_random,
+            'mean_embedding': mean_nonpadding_embs(embs=dec_embedding, pad=tgt_pad),
         }
         return outputs
 
@@ -844,39 +770,32 @@ class CellGen(nn.Module):
         all_time_steps,
         tgt_input_id_dict,
         tgt_pad_dict,
-        generate=False,
     ):
-        context_embedding_dict = {}
-        context_embedding_dict['context_t0'] = enc_output
-        context_pad_dict = {}
-        context_pad_dict['src_pad'] = src_attention_mask
+        context_embs_list = []
+        context_embs_list.append(enc_output)
+        context_pad_list = []
+        context_pad_list.append(src_attention_mask)
         # retrieve the embeddings to provide as context
         # pad the rest of the time steps
+        all_time_steps = sorted(all_time_steps)
         for time_step in all_time_steps:
             # exclude tgt_time_step from the context
             if time_step != tgt_time_step:
                 # if (generate is True) and (time_step in self.time_steps):
                 # only provide previous time steps as context
-                if len(context_embedding_dict) > 1:
-                    context_tensors = list(context_embedding_dict.values())
-                    context = torch.cat(context_tensors, dim=1)
-                else:
-                    context = enc_output
-                context_pads = list(context_pad_dict.values())
-                context_pad = torch.cat(context_pads, dim=1)
+                # if len(context_embedding_dict) > 1:
+                context = torch.cat(context_embs_list, dim=1)
+                # else:
+                #     context = enc_output
+                context_pad = torch.cat(context_pad_list, dim=1)
                 tgt_input_id = tgt_input_id_dict[f'tgt_input_id_t{time_step}']
                 tgt_pad = tgt_pad_dict[f'tgt_pad_t{time_step}']
                 with torch.no_grad():
                     tgt_embedding = self.token_embedding(tgt_input_id)
-                    if self.position_embedding == 'sinusoidal':
-                        dec_embedding = self.positional_encoding(
-                            tgt_embedding, time_step
-                        )
-                    elif self.position_embedding == 'learnt':
-                        dec_embedding = self.positional_encoding(tgt_embedding)
-                        dec_embedding = self.time_positional_encoding(
-                            dec_embedding, time_step
-                        )
+                    dec_embedding = self.rank_positional_encoding(tgt_embedding)
+                    dec_embedding = self.time_positional_encoding(
+                        dec_embedding, time_step
+                    )
                     # create context for the ones before the selected time step
                     # pad the rest
                     dec_outputs = self.call_decoder(
@@ -885,30 +804,12 @@ class CellGen(nn.Module):
                         dec_embedding=dec_embedding,
                         tgt_pad=tgt_pad,
                         time_random=time_step,
-                        generate=generate,
                         labels=None,
                     )
-                context_embedding_dict[f'context_t{time_step}'] = dec_outputs[
-                    'dec_embedding'
-                ]
-                # append the current pad to the previous context pad
-                context_pad_dict[f'tgt_pad_t{time_step}'] = tgt_pad
-        return context_embedding_dict, context_pad_dict
-
-    def concatenate_context(
-        self,
-        context_embedding_dict,
-        context_pad_dict,
-    ):
-        context_embedding_dict_ = context_embedding_dict.copy()
-        context_pad_dict_ = context_pad_dict.copy()
-        # if generate:
-        #     context_pad_dict_.pop(f'tgt_pad_t{tgt_time_step}')
-        context_tensors = list(context_embedding_dict_.values())
-        context_embedding = torch.cat(context_tensors, dim=1)
-        context_pads = list(context_pad_dict_.values())
-        context_pad = torch.cat(context_pads, dim=1)
-
+                    context_embs_list.append(dec_outputs['dec_embedding'])
+                    context_pad_list.append(tgt_pad)
+        context_embedding = torch.cat(context_embs_list, dim=1)
+        context_pad = torch.cat(context_pad_list, dim=1)
         return context_embedding, context_pad
 
     def forward(
@@ -962,12 +863,13 @@ class CellGen(nn.Module):
             dec_embedding_dict = {}
             mean_embedding_dict = {}
             labels = None
-            for tgt_time_step in self.time_steps:
+            sorted_time_steps = sorted(self.time_steps)
+            for tgt_time_step in sorted_time_steps:
                 tgt_pad = tgt_pad_dict[f'tgt_pad_t{tgt_time_step}']
                 tgt_input_id = tgt_input_id_dict[f'tgt_input_id_t{tgt_time_step}']
                 if context_mode:
                     # distinction between selected time step and rest time steps
-                    context_embedding_dict, context_pad_dict = self.generate_context(
+                    enc_output, src_attention_mask = self.generate_context(
                         enc_output=enc_output,
                         src_attention_mask=src_attention_mask,
                         tgt_time_step=tgt_time_step,
@@ -975,48 +877,30 @@ class CellGen(nn.Module):
                         tgt_input_id_dict=tgt_input_id_dict,
                         tgt_pad_dict=tgt_pad_dict,
                     )
-                    # context should be all the ones before the selected time step
-                    enc_output_, src_attention_mask_ = self.concatenate_context(
-                        context_embedding_dict=context_embedding_dict,
-                        context_pad_dict=context_pad_dict,
-                    )
-                else:
-                    enc_output_ = enc_output
-                    src_attention_mask_ = src_attention_mask
                 tgt_embedding = self.token_embedding(tgt_input_id)
-                if self.position_embedding == 'sinusoidal':
-                    tgt_embedding = self.positional_encoding(
-                        tgt_embedding, tgt_time_step
-                    )
-                elif self.position_embedding == 'learnt':
-                    tgt_embedding = self.positional_encoding(tgt_embedding)
-                    tgt_embedding = self.time_positional_encoding(
-                        tgt_embedding, tgt_time_step
-                    )
+                dec_embedding = self.rank_positional_encoding(tgt_embedding)
+                dec_embedding = self.time_positional_encoding(
+                    dec_embedding, tgt_time_step
+                )
                 # does not include any context
                 outputs = self.call_decoder(
-                    enc_output=enc_output_,
-                    src_attention_mask=src_attention_mask_,
+                    enc_output=enc_output,
+                    src_attention_mask=src_attention_mask,
                     dec_embedding=tgt_embedding,
                     tgt_pad=tgt_pad,
                     time_random=tgt_time_step,
-                    generate=False,
                     labels=labels,
                 )
                 dec_embedding_dict[tgt_time_step] = outputs['dec_embedding']
-                mean_embedding_dict[tgt_time_step] = mean_nonpadding_embs(
-                    embs=outputs['dec_embedding'],
-                    pad=tgt_pad,
-                )
+                mean_embedding_dict[tgt_time_step] = outputs['mean_embedding']
             outputs['mean_embedding'] = mean_embedding_dict
             outputs['dec_embedding'] = dec_embedding_dict
         else:
             if tgt_time_step is None:
                 tgt_time_step = np.random.choice(self.time_steps)
-
             if generate_id_dict is not None:
                 tgt_input_id_dict = generate_id_dict
-                generate = True
+                # generate = True
                 context_time_steps = self.total_time_steps
                 labels = None
 
@@ -1030,7 +914,7 @@ class CellGen(nn.Module):
                 )
 
             if generate_id_dict is None:
-                generate = False
+                # generate = False
                 context_time_steps = self.time_steps
                 tgt_input_id, labels = self.generate_mask(
                     tgt_input_id,
@@ -1042,37 +926,26 @@ class CellGen(nn.Module):
             # ---Initialise the decoder embeddings
             # to provide as context for selected time step---
             if context_mode:
-                context_embedding_dict, context_pad_dict = self.generate_context(
+                enc_output, src_attention_mask = self.generate_context(
                     enc_output=enc_output,
                     src_attention_mask=src_attention_mask,
                     tgt_time_step=tgt_time_step,
                     all_time_steps=context_time_steps,
                     tgt_input_id_dict=tgt_input_id_dict,
                     tgt_pad_dict=tgt_pad_dict,
-                    generate=generate,
                 )
                 # if generate:
                 #     context_pad_dict = generate_pad_dict
-                enc_output, src_attention_mask = self.concatenate_context(
-                    context_embedding_dict=context_embedding_dict,
-                    context_pad_dict=context_pad_dict,
-                )
 
             tgt_embedding = self.token_embedding(tgt_input_id)
-            if self.position_embedding == 'sinusoidal':
-                tgt_embedding = self.positional_encoding(tgt_embedding, tgt_time_step)
-            elif self.position_embedding == 'learnt':
-                tgt_embedding = self.positional_encoding(tgt_embedding)
-                tgt_embedding = self.time_positional_encoding(
-                    tgt_embedding, tgt_time_step
-                )
+            tgt_embedding = self.rank_positional_encoding(tgt_embedding)
+            tgt_embedding = self.time_positional_encoding(tgt_embedding, tgt_time_step)
             outputs = self.call_decoder(
                 enc_output=enc_output,
                 src_attention_mask=src_attention_mask,
                 dec_embedding=tgt_embedding,
                 tgt_pad=tgt_pad,
                 time_random=tgt_time_step,
-                generate=generate,
                 labels=labels,
             )
         return outputs
