@@ -1,6 +1,6 @@
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu (:gmodel=NVIDIAA100_SXM4_80GB if you want to specify the gpu model)
+#BSUB -gpu 'mode=exclusive_process:num=1' # request for exclusive access to gpu
 #BSUB -n 32 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
@@ -8,7 +8,7 @@
 #BSUB -e logs/cyto_generate_inter_%J.err # error file
 #BSUB -M 100000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>100000] rusage[mem=100000]' # RAM memory part 1. Default: 100MB
-#BSUB -J cytoimmgen_generate_inter_epoch0 # job name
+#BSUB -J cytoimmgen_generate_inter # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -40,13 +40,13 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode stratified \
 --generate True \
---ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1239_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_log-epoch=01.ckpt' \
+--ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240920_1524_cellgen_train_count_lr_0.005_wd_0.001_batch_256_zinb_tp_1-3_s_42_mask_pow-epoch=09.ckpt' \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt" \
 --src_adata "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_src/0h.h5ad" \
 --tgt_adata_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_tgt" \
---mapping_dict_path  "./T_perturb/T_perturb/pp/res/cytoimmgen/token_id_to_genename_hvg.pkl" \
+--mapping_dict_path  "./T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl" \
 --batch_size 256 \
 --max_len 300 \
 --tgt_vocab_size 20274 \
@@ -60,6 +60,5 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --condition_keys Cell_culture_batch \
 --time_steps 2 \
 --var_list Cell_population Cell_type Time_point Donor \
---mode GF_fine_tuned \
---mask_scheduler 'log'
+--mode GF_frozen \
 echo '--- Finished computing model'

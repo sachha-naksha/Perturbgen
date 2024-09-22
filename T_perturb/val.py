@@ -392,7 +392,8 @@ def main() -> None:
             max_seq_length=args.max_len + 100,
             dropout=args.cellgen_dropout,
             weight_decay=args.cellgen_wd,
-            lr=args.cellgen_lr,
+            end_lr=args.cellgen_lr,
+            mask_scheduler=args.mask_scheduler,
             # lr_scheduler_patience=5.0,
             # lr_scheduler_factor=0.8,
             return_embeddings=args.return_embeddings,
@@ -516,19 +517,18 @@ def main() -> None:
     # deepspeed_strategy = DeepSpeedStrategy(
     #     stage=2,
     # )
-    if torch.cuda.is_available():
-        cuda_device_name = torch.cuda.get_device_name()
-    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
-        print(f'Using {cuda_device_name} for training')
-        precision = 'bf16-mixed'
-    else:
-        precision = '16-mixed'
+    # if torch.cuda.is_available():
+    #     cuda_device_name = torch.cuda.get_device_name()
+    # if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+    #     print(f'Using {cuda_device_name} for training')
+    #     precision = 'bf16-mixed'
+    # else:
+    #     precision = '16-mixed'
     trainer = pl.Trainer(
         logger=wandb_logger,
         callbacks=[TQDMProgressBar(refresh_rate=10)],
         accelerator=accelerator,
         devices=1 if torch.cuda.is_available() else 0,  # inference only on one gpu
-        precision=precision,
     )
     # Finally, kick of the training process.
     if args.test_mode == 'masking':

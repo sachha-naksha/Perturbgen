@@ -61,5 +61,5 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --time_steps 2 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_fine_tuned \
---mask_scheduler 'log'
+--mask_scheduler 'log' \
 echo '--- Finished computing model'

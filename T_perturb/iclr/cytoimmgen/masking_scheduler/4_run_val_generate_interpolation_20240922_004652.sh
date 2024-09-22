@@ -40,7 +40,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode stratified \
 --generate True \
---ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1239_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_log-epoch=01.ckpt' \
+--ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1237_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_pow-epoch=01.ckpt' \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt" \
@@ -61,5 +61,5 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --time_steps 2 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_fine_tuned \
---mask_scheduler 'log'
+--mask_scheduler 'pow'
 echo '--- Finished computing model'

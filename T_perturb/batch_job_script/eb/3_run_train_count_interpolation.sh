@@ -48,7 +48,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --batch_size 32 \
 --max_len 270 \
 --epochs 100 \
---tgt_vocab_size 2001 \
+--tgt_vocab_size 20274 \
 --cellgen_lr 0.001 \
 --count_lr 0.0001 \
 --cellgen_wd 0.0001 \
@@ -61,5 +61,5 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --loss_mode zinb \
 --time_steps 1 2 4 \
 --var_list Time_point \
---mode GF_frozen
+--mode GF_frozen \
 echo '--- Finished computing model'

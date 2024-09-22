@@ -295,6 +295,7 @@ def main() -> None:
         )
     # check if the train indices are the same for both adata and dataset
     subset_adata = tgt_adata_tmp[train_indices]
+
     subset_dataset = tgt_datasets[f'tgt_dataset_t{args.time_steps[0]}'].select(
         train_indices
     )
@@ -390,7 +391,8 @@ def main() -> None:
             dropout=args.cellgen_dropout,
             mlm_probability=args.mlm_prob,
             weight_decay=args.cellgen_wd,
-            lr=args.cellgen_lr,
+            end_lr=args.cellgen_lr,
+            mask_scheduler=args.mask_scheduler,
             # lr_scheduler_patience=5.0,
             # lr_scheduler_factor=0.8,
             time_steps=args.time_steps,
@@ -510,7 +512,8 @@ def main() -> None:
         filename = (
             f'{run_id}_train_{args.train_mode}_lr_{args.count_lr}_wd_{args.count_wd}_'
             f'batch_{args.batch_size}_'
-            f'{args.loss_mode}_tp_{time_steps_str}_s_{args.seed}'
+            f'{args.loss_mode}_tp_{time_steps_str}_s_'
+            '{args.seed}_mask_{args.mask_scheduler}'
         )
         if args.split:
             monitor_metric = 'val/mse'
@@ -524,7 +527,7 @@ def main() -> None:
         dirpath=checkpoint_path,
         filename=f'{filename}-' + '{epoch:02d}',
         save_top_k=-1,
-        every_n_epochs=10,
+        every_n_epochs=1,
         verbose=True,
         monitor=monitor_metric,
         mode=mode,
@@ -567,13 +570,13 @@ def main() -> None:
     # deepspeed_strategy = DeepSpeedStrategy(
     #     stage=2,
     # )
-    if torch.cuda.is_available():
-        cuda_device_name = torch.cuda.get_device_name()
-    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
-        print(f'Using {cuda_device_name} for training')
-        precision = 'bf16-mixed'
-    else:
-        precision = '16-mixed'
+    # if torch.cuda.is_available():
+    #     cuda_device_name = torch.cuda.get_device_name()
+    # if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+    #     print(f'Using {cuda_device_name} for training')
+    #     precision = 'bf16-mixed'
+    # else:
+    #     precision = '16-mixed'
 
     # If the device is an A100, set the precision for matrix multiplication
     ddp_strategy = DDPStrategy(find_unused_parameters=True)
@@ -588,7 +591,6 @@ def main() -> None:
         accelerator='auto',
         devices=-1 if torch.cuda.is_available() else 0,
         strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
-        precision=precision,
     )
     print('Starting training...')
     if os.getcwd().split('/')[-1] != 'healthy_imm_expr':

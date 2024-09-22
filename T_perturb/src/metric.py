@@ -1,4 +1,4 @@
-from typing import (
+from typing import (  # List,; Union,
     Any,
     Dict,
     Optional,
@@ -13,6 +13,9 @@ from scipy.sparse import issparse
 from scipy.stats import wasserstein_distance
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import rbf_kernel
+
+from T_perturb.src.mmd import linear_mmd2, poly_mmd2
+from T_perturb.src.optimal_transport import wasserstein
 
 
 def pairwise_distance(x, y):
@@ -280,3 +283,39 @@ def lin_reg_summary(
             index=[0],
         )
         return lin_reg_df
+
+
+# Metric copied from:
+# https://github.com/theislab/CFGen/blob/main/cfgen/eval/distribution_distances.py # noqa
+def compute_distribution_distances(
+    pred: torch.Tensor, true: torch.Tensor
+) -> Dict[str, float]:
+    """
+    Computes distances between predicted and true distributions.
+
+    Args:
+        pred (torch.Tensor):
+            Predicted tensor of shape [batch, times, dims].
+        true (Union[torch.Tensor, list]):
+            True tensor of shape [batch, times, dims] or
+            list of tensors of length times.
+
+    Returns:
+        dict: Dictionary containing the computed distribution distances.
+    """
+    if isinstance(true, torch.Tensor):
+        min_size = min(pred.shape[0], true.shape[0])
+
+    names = ['1-Wasserstein', '2-Wasserstein', 'Linear_MMD', 'Poly_MMD']
+    dists = []
+    to_return = []
+    w1 = wasserstein(pred, true, power=1)
+    w2 = wasserstein(pred, true, power=2)
+    pred_4_mmd = pred[:min_size]
+    true_4_mmd = true[:min_size]
+    mmd_linear = linear_mmd2(pred_4_mmd, true_4_mmd).item()
+    mmd_poly = poly_mmd2(pred_4_mmd, true_4_mmd).item()
+    dists.append((w1, w2, mmd_linear, mmd_poly))
+
+    to_return.extend(np.array(dists).mean(axis=0))
+    return dict(zip(names, to_return))

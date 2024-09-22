@@ -6,8 +6,8 @@
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/cytoimmgen_masking_extrapolation_%J.out # output file
 #BSUB -e logs/cytoimmgen_masking_extrapolation_%J.err # error file
-#BSUB -M 50000  # RAM memory part 2. Default: 100MB
-#BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
+#BSUB -M 20000  # RAM memory part 2. Default: 100MB
+#BSUB -R 'select[mem>20000] rusage[mem=20000]' # RAM memory part 1. Default: 100MB
 #BSUB -J cytoimmgen_masking_extrapolation # job name
 
 # load cuda
@@ -46,7 +46,7 @@ python3 $cwd/train.py \
 --batch_size 512 \
 --max_len 300 \
 --epochs 50 \
---tgt_vocab_size 1254 \
+--tgt_vocab_size 20274 \
 --cellgen_lr 0.0001 \
 --cellgen_wd 0.0001 \
 --mlm_prob 0.15 \
@@ -58,5 +58,6 @@ python3 $cwd/train.py \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
 --context_mode True \
---seed 0
+--seed 0 \
+--mask_scheduler 'cosine'
 echo "--- Finished computing model"

@@ -11,6 +11,7 @@ from typing import (
 import anndata as ad
 import numpy as np
 import pandas as pd
+import scanpy as sc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,12 +21,13 @@ import torch.optim as optim
 from pytorch_lightning import LightningModule
 from scvi.distributions import NegativeBinomial, ZeroInflatedNegativeBinomial
 from torchmetrics import MeanSquaredError
-from torchmetrics.text import Perplexity
+from torchmetrics.text import Perplexity, rouge
 
-from T_perturb.Model.metric import evaluate_emd
 from T_perturb.Modules.T_model import CellGen, CountDecoder
 from T_perturb.src.losses import mse_loss
+from T_perturb.src.metric import compute_distribution_distances, evaluate_emd
 from T_perturb.src.utils import (
+    WarmupScheduler,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
@@ -34,6 +36,16 @@ from T_perturb.src.utils import (
 )
 
 # from deepspeed.ops.adam import FusedAdam
+
+
+def set_matmul_precision_for_device():
+    if torch.cuda.is_available():
+        cuda_device_name = torch.cuda.get_device_name()
+    # If the device is an A100, set the precision for matrix multiplication
+    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+        print(f'Using {cuda_device_name} for training')
+        print('Set float32_matmul_precision to medium')
+        torch.set_float32_matmul_precision('medium')
 
 
 class CellGenTrainer(LightningModule):
@@ -48,14 +60,18 @@ class CellGenTrainer(LightningModule):
         dropout: float = 0.0,
         mlm_probability: float = 0.15,
         weight_decay: float = 0.0,
-        lr: float = 1e-3,
+        initial_lr: float = 1e-4,
+        end_lr: float = 1e-3,
         # lr_scheduler_patience: float = 5.0,
         return_embeddings: bool = False,
         generate: bool = False,
         time_steps: list = [1, 2],
         total_time_steps: int = 3,
+        num_epochs: int = 5,
+        warmup_epochs: int = 1,
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
         mode: str = 'GF_fine_tuned',
+        mask_scheduler: str = 'cosine',
         context_mode: bool = True,
         var_list: Optional[List[str]] = None,
         gene_names: Optional[List[str]] = None,
@@ -65,6 +81,7 @@ class CellGenTrainer(LightningModule):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
+        set_matmul_precision_for_device()
         self.transformer = CellGen(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -77,13 +94,16 @@ class CellGenTrainer(LightningModule):
             time_steps=time_steps,
             total_time_steps=total_time_steps,
             mode=mode,
+            mask_scheduler=mask_scheduler,
         )
-
         self.masking_loss = nn.CrossEntropyLoss()
         self.timepoint_loss = nn.CrossEntropyLoss()
 
         self.weight_decay = weight_decay
-        self.lr = lr
+        self.initial_lr = initial_lr
+        self.end_lr = end_lr
+        self.num_epochs = num_epochs
+        self.warmup_epochs = warmup_epochs
         # self.lr_scheduler_patience = lr_scheduler_patience
         # self.lr_scheduler_factor = lr_scheduler_factor
         self.perplexity = Perplexity(ignore_index=-100)
@@ -93,7 +113,9 @@ class CellGenTrainer(LightningModule):
                 mapping_dict_path,
                 'rb',
             ) as f:
-                self.subset_tokenid_to_genename = pickle.load(f)
+                ensembl_to_token_id = pickle.load(f)
+        # change to token_id to gene name
+        self.token_id_to_ensembl = {v: k for k, v in ensembl_to_token_id.items()}
         self.return_embeddings = return_embeddings
         self.generate = generate
         self.tgt_vocab_size = tgt_vocab_size
@@ -147,7 +169,7 @@ class CellGenTrainer(LightningModule):
                 ),
                 dim=1,
             )
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = tgt_input_id_
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         outputs = self.transformer(
             src_input_id=batch['src_input_ids'],
             tgt_input_id_dict=tgt_input_id_dict,
@@ -157,8 +179,17 @@ class CellGenTrainer(LightningModule):
         return outputs
 
     def configure_optimizers(self):
-        parameters = [{'params': self.transformer.parameters(), 'lr': self.lr}]
+        parameters = [{'params': self.transformer.parameters(), 'lr': self.end_lr}]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
+        number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
+        # total_steps = self.num_epochs * number_of_batches_per_epoch
+        warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
+        scheduler = WarmupScheduler(
+            optimizer,
+            warmup_steps=warmup_steps,
+            initial_lr=self.initial_lr,
+            end_lr=self.end_lr,
+        )
         # optimizer = FusedAdam(
         #     self.transformer.parameters(), lr=self.lr, weight_decay=self.weight_decay
         # )
@@ -174,6 +205,8 @@ class CellGenTrainer(LightningModule):
             # 'lr_scheduler': lr_scheduler,
             # 'scheduler_type': 'WarmupCosineLR',
             'monitor': 'train/masking_loss',
+            'interval': 'step',
+            'lr_scheduler': scheduler,
         }
 
     def training_step(self, batch, *args, **kwargs):
@@ -312,13 +345,13 @@ class CellGenTrainer(LightningModule):
                     marker_genes=marker_genes,
                     cos_similarity=cos_similarity,
                     gene_embeddings=gene_embeddings,
-                    mapping_dict=self.subset_tokenid_to_genename,
+                    mapping_dict=self.token_id_to_ensembl,
                     token_ids=token_ids,
                 )
                 marker_gene_embeddings = return_gene_embeddings(
                     marker_genes=marker_genes,
                     gene_embeddings=gene_embeddings,
-                    mapping_dict=self.subset_tokenid_to_genename,
+                    mapping_dict=self.token_id_to_ensembl,
                     token_ids=token_ids,
                 )
                 self.marker_genes = marker_genes_dict
@@ -406,10 +439,13 @@ class CountDecoderTrainer(LightningModule):
         n_samples: int = 1,
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
         mode: str = 'GF_fine_tuned',
+        mapping_dict_path: str = (
+            './T_perturb/Geneformer/geneformer/' 'token_dictionary_gc95M.pkl'
+        ),
         seed: int = 42,
         context_mode: bool = True,
         n_genes: int = 25426,
-        mask_scheduler: Optional[str] = 'cosine',
+        mask_scheduler: Optional[str] = 'c[osine',
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
         ckpt_count_path: Optional[str] = None,
@@ -420,6 +456,15 @@ class CountDecoderTrainer(LightningModule):
     ):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
+        set_matmul_precision_for_device()
+        if mapping_dict_path is not None:
+            with open(
+                mapping_dict_path,
+                'rb',
+            ) as f:
+                ensembl_to_token_id = pickle.load(f)
+        # change to token_id to gene name
+        self.token_id_to_ensembl = {v: k for k, v in ensembl_to_token_id.items()}
         pretrained_model = CellGen(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -439,7 +484,7 @@ class CountDecoderTrainer(LightningModule):
             # set parameters to not trainable
             for param in pretrained_model.parameters():
                 param.requires_grad = False
-
+        self.rouge = rouge.ROUGEScore(rouge_keys='rouge1')
         self.decoder = CountDecoder(
             pretrained_model=pretrained_model,
             loss_mode=loss_mode,
@@ -502,6 +547,9 @@ class CountDecoderTrainer(LightningModule):
             'ctrl_counts': [],
             'pred_counts': [],
             'cls_embeddings': [],
+            'rouge_f1': [],
+            'rouge_precision': [],
+            'rouge_recall': [],
         }
         self.n_samples = n_samples
         if var_list is not None:
@@ -541,7 +589,7 @@ class CountDecoderTrainer(LightningModule):
                 ),
                 dim=1,
             )
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = tgt_input_id_
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         outputs = self.decoder(
             src_input_id=batch['src_input_ids'],
             tgt_input_id_dict=tgt_input_id_dict,
@@ -777,9 +825,9 @@ class CountDecoderTrainer(LightningModule):
     def test_step(self, batch, *args, **kwargs):
         tgt_input_id_dict = {}
         for i in range(1, self.total_time_steps + 1):
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = batch[f'tgt_input_ids_t{i}']
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = batch[f'tgt_input_ids_t{i}']
         if self.generate:
-            outputs = self.decoder.generate(
+            outputs, pred_ids_dict = self.decoder.generate(
                 src_input_id=batch['src_input_ids'],
                 tgt_input_id_dict=tgt_input_id_dict,
                 max_len=self.max_seq_length,
@@ -790,6 +838,63 @@ class CountDecoderTrainer(LightningModule):
                 temperature=self.temperature,
                 iterations=self.iterations,
             )
+
+            for time_step in pred_ids_dict.keys():
+                pred_ids = pred_ids_dict[time_step].cpu().numpy()
+                tgt_ids = batch[time_step].cpu().numpy()
+                # exclude task token and padding token
+                # exclude padding token
+                pred_ids = pred_ids[:, 1:]
+                special_tokens = np.array([0, 1, 2, 3])
+                pred_ids = pred_ids[~np.isin(pred_ids, special_tokens)].tolist()
+                tgt_ids = tgt_ids[:, 1:]
+                tgt_ids = tgt_ids[~np.isin(tgt_ids, special_tokens)].tolist()
+                pred_genes = [
+                    str(self.token_id_to_ensembl.get(idx, idx)) for idx in pred_ids
+                ]
+                true_genes = [
+                    str(self.token_id_to_ensembl.get(idx, idx)) for idx in tgt_ids
+                ]
+                pred_genes = ' '.join(pred_genes)
+                true_genes = ' '.join(true_genes)
+                # rouge score
+                rouge_score = self.rouge(pred_genes, true_genes)
+                self.log(
+                    'test/rouge_f1',
+                    rouge_score['rouge1_fmeasure'],
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=True,
+                    logger=True,
+                    rank_zero_only=True,
+                    sync_dist=True,
+                    batch_size=batch['src_input_ids'].shape[0],
+                )
+                self.log(
+                    'test/rouge_precision',
+                    rouge_score['rouge1_precision'],
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=True,
+                    logger=True,
+                    rank_zero_only=True,
+                    sync_dist=True,
+                    batch_size=batch['src_input_ids'].shape[0],
+                )
+                self.log(
+                    'test/rouge_recall',
+                    rouge_score['rouge1_recall'],
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=True,
+                    logger=True,
+                    rank_zero_only=True,
+                    sync_dist=True,
+                    batch_size=batch['src_input_ids'].shape[0],
+                )
+            self.test_dict['rouge_f1'].append(rouge_score['rouge1_fmeasure'])
+            self.test_dict['rouge_precision'].append(rouge_score['rouge1_precision'])
+            self.test_dict['rouge_recall'].append(rouge_score['rouge1_recall'])
             count_loss, pred_counts_dict = self.compute_count_loss(
                 outputs=outputs,
                 batch=batch,
@@ -831,7 +936,6 @@ class CountDecoderTrainer(LightningModule):
                 logger=True,
                 sync_dist=True,
             )
-
         else:
             outputs = self.forward(batch)
             count_loss, pred_count = self.compute_count_loss(outputs, batch)
@@ -871,15 +975,54 @@ class CountDecoderTrainer(LightningModule):
             pred_adata.obsm['cls_embeddings'] = cls_embeddings.numpy()
             true_adata = pred_adata.copy()
             true_adata.X = true_counts.numpy()
+            # use scanpy pca to reduce dimensionality
+
             # create output directory
             # save adata
             pred_adata.write_h5ad(
                 f'{self.output_dir}/{self.date}_'
                 f'random_pairing_stratified_pairing_generate_adata_'
-                f'{self.time_steps}_{self.mode}_{self.seed}_'
-                f'{self.loss_mode}_{self.n_samples}.h5ad'
+                f't{self.time_steps}_{self.mode}_s{self.seed}_'
+                f'l{self.loss_mode}_n{self.n_samples}'
+                f'_m{self.mask_scheduler}.h5ad'
             )
             print('---anndata generation completed')
+            # save metrics
+            metric_mean = {}
+            # true counts are stored in the 'counts' layer
+            true_adata = pred_adata.copy()
+            true_adata.X = true_adata.layers['counts']
+            # log norm and compute PCA
+            sc.pp.normalize_total(pred_adata, target_sum=1e4)
+            sc.pp.log1p(pred_adata)
+            sc.tl.pca(pred_adata, svd_solver='arpack', n_comps=5)
+            sc.pp.normalize_total(true_adata, target_sum=1e4)
+            sc.pp.log1p(true_adata)
+            sc.tl.pca(true_adata, svd_solver='arpack', n_comps=5)
+            # subsample 25k cells
+            if pred_adata.shape[0] > 10000:
+                sc.pp.subsample(pred_adata, n_obs=10000, copy=False)
+                # use obs index to subsample true counts
+                true_adata = true_adata[pred_adata.obs.index]
+            mmd_wasserstein = compute_distribution_distances(
+                torch.tensor(true_adata.obsm['X_pca']).float(),
+                torch.tensor(pred_adata.obsm['X_pca']).float(),
+            )
+            for metric in mmd_wasserstein:
+                metric_mean[metric + '_PCA'] = mmd_wasserstein[metric]
+
+            if self.test_dict['rouge_f1']:
+                metric_mean['rouge_f1'] = np.mean(self.test_dict['rouge_f1'])
+                metric_mean['rouge_precision'] = np.mean(
+                    self.test_dict['rouge_precision']
+                )
+                metric_mean['rouge_recall'] = np.mean(self.test_dict['rouge_recall'])
+
+                metrics = pd.DataFrame(metric_mean, index=[0])
+                metrics.to_csv(
+                    f'{self.output_dir}/{self.date}_{self.mask_scheduler}_metrics.csv'
+                )
+
             emd = evaluate_emd(true_adata, pred_adata)
             self.log(
                 'test/emd',

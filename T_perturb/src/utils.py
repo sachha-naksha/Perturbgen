@@ -22,8 +22,38 @@ from geneformer import EmbExtractor
 from geneformer.emb_extractor import get_embs, label_cell_embs
 from scipy.sparse import csr_matrix
 from torch.nn.functional import cosine_similarity
+from torch.optim import Optimizer
 from torch.utils.data import Subset
 from torchmetrics import PearsonCorrCoef
+
+
+class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        warmup_steps: int,
+        initial_lr: float,
+        end_lr: float,
+        last_epoch: int = -1,
+    ):
+        self.warmup_steps = warmup_steps
+        self.initial_lr = initial_lr
+        self.end_lr = end_lr
+        super(WarmupScheduler, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        current_step = self.last_epoch + 1
+        if current_step < self.warmup_steps:
+            # Linear warmup phase: increase from initial_lr to end_lr
+            warmup_lr = [
+                self.initial_lr
+                + (self.end_lr - self.initial_lr) * (current_step / self.warmup_steps)
+                for _ in self.base_lrs
+            ]
+            return warmup_lr
+        else:
+            # After warmup, maintain the end_lr (constant LR)
+            return [self.end_lr for _ in self.base_lrs]
 
 
 def read_dataset_files(directory, file_type):

@@ -40,7 +40,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --splitting_mode stratified \
 --return_embed True \
 --generate False \
---ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/embedding_analysis/res/checkpoints/20240918_1747_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_512_mlmp_0.15_tp_1-2-3_s_42-epoch=29.ckpt" \
+--ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/embedding_analysis/res/checkpoints/20240919_2325_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_mlmp_0.15_tp_1-2-3_s_42-epoch=19.ckpt" \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src_4096/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt_4096" \
@@ -59,6 +59,6 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --condition_keys Cell_culture_batch \
 --time_steps 1 2 3 \
 --var_list Cell_population Cell_type Time_point Donor \
---mode GF_fine_tuned \
+--mode GF_frozen \
 --context_mode True
 echo "--- Finished computing model"

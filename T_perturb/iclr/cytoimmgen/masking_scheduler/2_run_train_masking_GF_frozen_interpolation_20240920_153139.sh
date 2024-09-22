@@ -1,6 +1,6 @@
 #!/bin/bash
 #BSUB -q gpu-huge # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=2:block=yes:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu #
+#BSUB -gpu 'mode=exclusive_process:num=1:block=yes:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu
 #BSUB -n 32 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
@@ -58,5 +58,5 @@ python3 $cwd/train.py \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
 --seed 42 \
---mask_scheduler 'exp'
+--mask_scheduler 'uniform'
 echo "--- Finished computing model"
