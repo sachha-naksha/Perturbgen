@@ -1,6 +1,6 @@
 #!/bin/bash
-#BSUB -q gpu-basement # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu (:gmodel=NVIDIAA100_SXM4_80GB)
+#BSUB -q gpu-huge # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -gpu 'mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu
 #BSUB -n 32 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
@@ -40,7 +40,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode stratified \
 --generate True \
---ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1200_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_cosine-epoch=02.ckpt' \
+--ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1828_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_exp-epoch=01.ckpt' \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt" \
@@ -61,8 +61,8 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --time_steps 1 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
---mask_scheduler 'cosine' \
---guided_gene_list_dir "./T_perturb/T_perturb/iclr/cytoimmgen/generation/20240920_marker_genelist_cytoimmgen.csv" \
+--mask_scheduler 'exp' \
+--guided_gene_list_dir None \
 --hvg_gene_list_dir "./T_perturb/T_perturb/iclr/cytoimmgen/generation/hvg_list.pkl" \
 --generate_cell_type 'TEMRA 16h'
 echo '--- Finished computing model'

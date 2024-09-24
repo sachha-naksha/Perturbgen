@@ -513,7 +513,7 @@ def main() -> None:
             f'{run_id}_train_{args.train_mode}_lr_{args.count_lr}_wd_{args.count_wd}_'
             f'batch_{args.batch_size}_'
             f'{args.loss_mode}_tp_{time_steps_str}_s_'
-            '{args.seed}_mask_{args.mask_scheduler}'
+            f'{args.seed}_mask_{args.mask_scheduler}'
         )
         if args.split:
             monitor_metric = 'val/mse'

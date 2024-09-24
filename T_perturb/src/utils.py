@@ -59,6 +59,7 @@ class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
 def read_dataset_files(directory, file_type):
     dataset_dict = {}
     for filename in os.listdir(directory):
+        print(f'Loading {filename}...')
         if filename.endswith(f'.{file_type}'):
             filename_ = os.path.join(directory, filename)
             if file_type == 'dataset':

@@ -14,7 +14,7 @@
 module load cuda-12.1.1
 
 # activate conda environment
-source /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/.cellgen_4096/bin/activate
+source /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/.cellgen/bin/activate
 cwd=$(pwd)
 
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
@@ -39,16 +39,16 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode random \
 --output_dir $RES_DIR/$RES_NAME/res \
---ckpt_masking_path './T_perturb/T_perturb/iclr/eb/interpolation/res/checkpoints/20240917_2117_cellgen_train_masking_lr_0.001_wd_0.0001_batch_32_mlmp_0.15_tp_1-2-4_s_42-epoch=99.ckpt' \
---src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_src_4096/Day 00-03.dataset' \
---tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_tgt_4096' \
---src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src_4096/Day 00-03.h5ad' \
---tgt_adata_folder './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_tgt_4096' \
+--ckpt_masking_path './T_perturb/T_perturb/iclr/eb/interpolation/res/checkpoints/20240922_1141_cellgen_train_masking_lr_0.001_wd_0.0001_batch_32_mlmp_0.15_tp_1-2-4_s_42-epoch=99.ckpt' \
+--src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_src/Day 00-03.dataset' \
+--tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_tgt' \
+--src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src/Day 00-03.h5ad' \
+--tgt_adata_folder './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_tgt' \
 --mapping_dict_path  './T_perturb/T_perturb/pp/res/eb/token_id_to_genename_hvg.pkl' \
 --batch_size 32 \
---max_len 270 \
+--max_len 300 \
 --epochs 100 \
---tgt_vocab_size 2001 \
+--tgt_vocab_size 20274 \
 --cellgen_lr 0.001 \
 --count_lr 0.0001 \
 --cellgen_wd 0.0001 \
@@ -61,5 +61,6 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --loss_mode zinb \
 --time_steps 1 2 4 \
 --var_list Time_point \
---mode GF_frozen
+--mode GF_frozen \
+--mask_scheduler 'exp'
 echo '--- Finished computing model'

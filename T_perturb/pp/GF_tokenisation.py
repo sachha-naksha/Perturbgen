@@ -232,6 +232,22 @@ adata.obs = adata.obs[args.var_list]
 adata.var = adata.var[['gene_name', 'ensembl_id']]
 adata.obs['n_counts'] = adata.X.sum(axis=1)
 
+with open(
+    './T_perturb/Geneformer/geneformer/ensembl_mapping_dict_gc95M.pkl', 'rb'
+) as f:
+    gene_mapping_dict = pickle.load(f)
+gene_ids_collapsed = [
+    gene_mapping_dict.get(gene_id.upper()) for gene_id in adata.var.ensembl_id
+]
+gene_ids_collapsed_in_dict = [
+    gene for gene in gene_ids_collapsed if gene in token_dict.keys()
+]
+adata_duplicated = adata.copy()
+adata_duplicated.var['ensembl_id_collapsed'] = gene_ids_collapsed
+adata_duplicated.var_names = gene_ids_collapsed
+adata = adata[:, ~adata_duplicated.var.index.isna()]
+
+
 adata.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad')
 
 print('Finished preprocessing adata.')

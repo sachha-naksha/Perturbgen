@@ -24,14 +24,14 @@ echo '--- Start computing model'
 # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
 RES_NAME="cytoimmgen/masking_scheduler"
-# if directory does not e
-echo create it with the name $RES_NAME
-mkdir -p $RES_DIR/$RES_NAME
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# copy the current script to the result directory
-cp $0 $RES_DIR/$RES_NAME/4_run_val_generate_interpolation_$TIMESTAMP.sh
-echo "Copying script to $RES_DIR/$RES_NAME/4_run_val_generate_interpolation_$TIMESTAMP.sh"
+# # if directory does not e
+# echo create it with the name $RES_NAME
+# mkdir -p $RES_DIR/$RES_NAME
+# # Get the current timestamp
+# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# # copy the current script to the result directory
+# cp $0 $RES_DIR/$RES_NAME/4_run_val_generate_interpolation_$TIMESTAMP.sh
+# echo "Copying script to $RES_DIR/$RES_NAME/4_run_val_generate_interpolation_$TIMESTAMP.sh"
 
 # ----------------- Interpolation -----------------
 # python3 $cwd/val.py \
@@ -40,7 +40,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode stratified \
 --generate True \
---ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1239_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_log-epoch=01.ckpt' \
+--ckpt_count_path './T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240921_1828_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-3_s_42_mask_exp-epoch=01.ckpt' \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt" \
@@ -60,6 +60,6 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --condition_keys Cell_culture_batch \
 --time_steps 2 \
 --var_list Cell_population Cell_type Time_point Donor \
---mode GF_fine_tuned \
---mask_scheduler 'log'
+--mode GF_frozen \
+--mask_scheduler 'exp'
 echo '--- Finished computing model'

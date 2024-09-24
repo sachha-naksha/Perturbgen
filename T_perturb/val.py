@@ -2,9 +2,12 @@
 
 import argparse
 import os
+import pickle
+import re
 import uuid
 from datetime import datetime
 
+import pandas as pd
 import pytorch_lightning as pl
 import scanpy as sc
 import torch
@@ -234,6 +237,21 @@ def get_args():
         default=True,
         help='context mode for timepoints',
     )
+    parser.add_argument(
+        '--guided_gene_list_dir',
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        '--generate_cell_type',
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        '--hvg_gene_list_dir',
+        type=str,
+        default=None,
+    )
     args = parser.parse_args()
     return args
 
@@ -247,10 +265,99 @@ def main() -> None:
     torch.manual_seed(args.seed)
     # Load and preprocess data
     print('Loading and preprocessing data...')
-    tgt_datasets = read_dataset_files(args.tgt_dataset_folder, 'dataset')
-    tgt_adatas = read_dataset_files(args.tgt_adata_folder, 'h5ad')
+    tgt_datasets = read_dataset_files(
+        args.tgt_dataset_folder,
+        'dataset',
+    )
+    tgt_adatas = read_dataset_files(
+        args.tgt_adata_folder,
+        'h5ad',
+    )
     src_dataset = load_from_disk(args.src_dataset)
     src_adata = sc.read_h5ad(args.src_adata)
+
+    # filter for cell type of interest
+    if args.generate_cell_type:
+        tp_cell_type = []
+        pairing_index_list = []
+        pattern = r'tgt_h5ad_t(\d+)'
+        for file_name, tgt_adata in tgt_adatas.items():
+            if args.guided_gene_list_dir:
+                tp_cell_type.extend(
+                    tgt_adatas[file_name].obs['Cell_population'].unique().tolist()
+                )
+            # add row index to filter src
+            tgt_adata.obs['index'] = range(len(tgt_adata))
+            # only select specific timepoints
+            cell_type_mask = tgt_adata.obs['Cell_population'] == args.generate_cell_type
+            if sum(cell_type_mask) == 0:
+                pass
+            else:
+                cell_type_idx = tgt_adata.obs['cell_pairing_index'][cell_type_mask]
+                cell_type_idx = cell_type_idx.tolist()
+                pairing_index = tgt_adata[cell_type_mask].obs['index'].tolist()
+
+                pairing_index_list.extend(pairing_index)
+                tgt_adatas[file_name].obs.drop('index', axis=1, inplace=True)
+
+        if len(pairing_index) > 0:
+            src_adata = src_adata[pairing_index]
+            src_dataset = src_dataset.select(pairing_index)
+            for file_name, tgt_adata in tgt_adatas.items():
+                re_file_name = re.search(pattern, file_name)
+                if re_file_name:
+                    time_step = int(re_file_name.group(1))
+                    tgt_datasets[f'tgt_dataset_t{time_step}'] = tgt_datasets[
+                        f'tgt_dataset_t{time_step}'
+                    ].select(pairing_index)
+                    tgt_adatas[file_name] = tgt_adata[pairing_index]
+    with open(args.hvg_gene_list_dir, 'rb') as f:
+        hvg_gene_list = pickle.load(f)
+    # create gene list for guided generation
+    if args.guided_gene_list_dir:
+        guided_gene_df = pd.read_csv(args.guided_gene_list_dir)
+        # only select cell type of selected timepoint
+        guided_gene_df = guided_gene_df[
+            guided_gene_df['cell_population'].isin(tp_cell_type)
+        ]
+        # select unique genes with value counts for cell_population ==1
+        unique_genes = (
+            guided_gene_df['gene_id']
+            .value_counts()[guided_gene_df['gene_id'].value_counts() == 1]
+            .index
+        )
+        cell_type_df = guided_gene_df[
+            guided_gene_df['cell_population'] == args.generate_cell_type
+        ]
+        # find intersect between unique genes and cell type genes
+        unique_genes_df = cell_type_df[
+            cell_type_df['gene_id'].isin(unique_genes)
+        ].copy()
+        if unique_genes_df.shape[0] == 0:
+            raise ValueError(
+                f'No unique genes found in guided '
+                f'gene list for {args.generate_cell_type}'
+            )
+
+        # find shared genes in the guided gene list
+        shared_genes = cell_type_df[~cell_type_df['gene_id'].isin(unique_genes)][
+            'gene_id'
+        ]
+        # sample 25 genes from the shared gene list
+        # if len(shared_genes) > 25:
+        #     shared_genes = shared_genes.sample(50)
+        # else:
+        #     shared_genes = shared_genes
+        shared_genes_df = cell_type_df[cell_type_df['gene_id'].isin(shared_genes)]
+        print(f'Unique genes: {unique_genes_df}')
+        print(f'Shared genes: {shared_genes_df.shape[0]}')
+        all_genes_df = pd.concat([unique_genes_df, shared_genes_df])
+        token_dict = {
+            k: v for k, v in zip(all_genes_df['gene_name'], all_genes_df['token_id'])
+        }
+        print(f'Guided gene list created with {len(token_dict)} genes')
+    else:
+        token_dict = None
 
     # use the tmp adata for all operation
     # where the metadata and information is shared across timepoints
@@ -380,6 +487,7 @@ def main() -> None:
     print('Data loaded and preprocessed.')
     # count number of unique timepoints
     n_total_timepoints = len(tgt_adatas)
+
     # Initialize model module
     # ----------------------------------------------------------------------------------
     if args.test_mode == 'masking':
@@ -439,6 +547,8 @@ def main() -> None:
             seed=args.seed,
             context_mode=args.context_mode,
             n_genes=tgt_adata_tmp.X.shape[1],
+            guided_gene_list=token_dict,
+            hvg_gene_list=hvg_gene_list,
         )
     else:
         raise ValueError('test_mode not recognised, needs to be masking or count')

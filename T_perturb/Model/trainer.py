@@ -445,12 +445,14 @@ class CountDecoderTrainer(LightningModule):
         seed: int = 42,
         context_mode: bool = True,
         n_genes: int = 25426,
-        mask_scheduler: Optional[str] = 'c[osine',
+        mask_scheduler: Optional[str] = 'cosine',
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
         ckpt_count_path: Optional[str] = None,
         conditions: Optional[Dict[Any, Any]] = None,
         conditions_combined: Optional[List[Any]] = None,
+        guided_gene_list: Optional[pd.DataFrame] = None,
+        hvg_gene_list: Optional[dict] = None,
         *args,
         **kwargs,
     ):
@@ -547,10 +549,12 @@ class CountDecoderTrainer(LightningModule):
             'ctrl_counts': [],
             'pred_counts': [],
             'cls_embeddings': [],
-            'rouge_f1': [],
-            'rouge_precision': [],
-            'rouge_recall': [],
         }
+        self.seq_len_list = [25, 100, max_seq_length]
+        for seq_len in self.seq_len_list:
+            self.test_dict[f'rouge_f1_{seq_len}'] = []
+            self.test_dict[f'rouge_precision_{seq_len}'] = []
+            self.test_dict[f'rouge_recall_{seq_len}'] = []
         self.n_samples = n_samples
         if var_list is not None:
             self.var_list = var_list
@@ -576,6 +580,14 @@ class CountDecoderTrainer(LightningModule):
         self.mode = mode
         self.seed = seed
         self.date = datetime.now().strftime('%Y%m%d-%H:%M')
+        # guided generation
+        if guided_gene_list is not None:
+            self.guided_gene_list = guided_gene_list
+        else:
+            self.guided_gene_list = None
+
+        if hvg_gene_list is not None:
+            self.hvg_gene_list = hvg_gene_list
 
     def forward(self, batch):
         tgt_input_id_dict = {}
@@ -825,7 +837,16 @@ class CountDecoderTrainer(LightningModule):
     def test_step(self, batch, *args, **kwargs):
         tgt_input_id_dict = {}
         for i in range(1, self.total_time_steps + 1):
-            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = batch[f'tgt_input_ids_t{i}']
+            tgt_input_id_ = torch.cat(
+                (
+                    getattr(self, f'cls_token_{str(i)}').expand(
+                        batch[f'tgt_input_ids_t{i}'].shape[0], -1
+                    ),
+                    batch[f'tgt_input_ids_t{i}'],
+                ),
+                dim=1,
+            )
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         if self.generate:
             outputs, pred_ids_dict = self.decoder.generate(
                 src_input_id=batch['src_input_ids'],
@@ -837,6 +858,8 @@ class CountDecoderTrainer(LightningModule):
                 # time_steps=self.time_steps,
                 temperature=self.temperature,
                 iterations=self.iterations,
+                guided_gene_list=self.guided_gene_list,
+                hvg_gene_list=self.hvg_gene_list,
             )
 
             for time_step in pred_ids_dict.keys():
@@ -857,12 +880,28 @@ class CountDecoderTrainer(LightningModule):
                 ]
                 pred_genes = ' '.join(pred_genes)
                 true_genes = ' '.join(true_genes)
-                # rouge score
-                rouge_score = self.rouge(pred_genes, true_genes)
+                # predict rouge score for different lengths: 25, 100, full length
+                for seq_len in self.seq_len_list:
+                    if self.max_seq_length > seq_len:
+                        pred_genes_short = pred_genes[:seq_len]
+                        true_genes_short = true_genes[:seq_len]
+                    else:
+                        pred_genes_short = pred_genes
+                        true_genes_short = true_genes
+                    rouge_score = self.rouge(pred_genes_short, true_genes_short)
+                    self.test_dict[f'rouge_f1_{seq_len}'].append(
+                        rouge_score['rouge1_fmeasure']
+                    )
+                    self.test_dict[f'rouge_precision_{seq_len}'].append(
+                        rouge_score['rouge1_precision']
+                    )
+                    self.test_dict[f'rouge_recall_{seq_len}'].append(
+                        rouge_score['rouge1_recall']
+                    )
                 self.log(
                     'test/rouge_f1',
                     rouge_score['rouge1_fmeasure'],
-                    on_step=True,
+                    on_step=False,
                     on_epoch=True,
                     prog_bar=True,
                     logger=True,
@@ -873,7 +912,7 @@ class CountDecoderTrainer(LightningModule):
                 self.log(
                     'test/rouge_precision',
                     rouge_score['rouge1_precision'],
-                    on_step=True,
+                    on_step=False,
                     on_epoch=True,
                     prog_bar=True,
                     logger=True,
@@ -884,7 +923,7 @@ class CountDecoderTrainer(LightningModule):
                 self.log(
                     'test/rouge_recall',
                     rouge_score['rouge1_recall'],
-                    on_step=True,
+                    on_step=False,
                     on_epoch=True,
                     prog_bar=True,
                     logger=True,
@@ -892,15 +931,12 @@ class CountDecoderTrainer(LightningModule):
                     sync_dist=True,
                     batch_size=batch['src_input_ids'].shape[0],
                 )
-            self.test_dict['rouge_f1'].append(rouge_score['rouge1_fmeasure'])
-            self.test_dict['rouge_precision'].append(rouge_score['rouge1_precision'])
-            self.test_dict['rouge_recall'].append(rouge_score['rouge1_recall'])
+
             count_loss, pred_counts_dict = self.compute_count_loss(
                 outputs=outputs,
                 batch=batch,
                 n_samples=self.n_samples,
             )
-
             self.log(
                 'test/loss',
                 count_loss,
@@ -1011,17 +1047,21 @@ class CountDecoderTrainer(LightningModule):
             for metric in mmd_wasserstein:
                 metric_mean[metric + '_PCA'] = mmd_wasserstein[metric]
 
-            if self.test_dict['rouge_f1']:
-                metric_mean['rouge_f1'] = np.mean(self.test_dict['rouge_f1'])
-                metric_mean['rouge_precision'] = np.mean(
-                    self.test_dict['rouge_precision']
-                )
-                metric_mean['rouge_recall'] = np.mean(self.test_dict['rouge_recall'])
-
-                metrics = pd.DataFrame(metric_mean, index=[0])
-                metrics.to_csv(
-                    f'{self.output_dir}/{self.date}_{self.mask_scheduler}_metrics.csv'
-                )
+            if self.test_dict[f'rouge_f1_{self.seq_len_list[0]}']:
+                for seq_len in self.seq_len_list:
+                    metric_mean[f'rouge_f1_{seq_len}'] = np.mean(
+                        self.test_dict[f'rouge_f1_{seq_len}']
+                    )
+                    metric_mean[f'rouge_precision_{seq_len}'] = np.mean(
+                        self.test_dict[f'rouge_precision_{seq_len}']
+                    )
+                    metric_mean[f'rouge_recall_{seq_len}'] = np.mean(
+                        self.test_dict[f'rouge_recall_{seq_len}']
+                    )
+            metrics = pd.DataFrame(metric_mean, index=[0])
+            metrics.to_csv(
+                f'{self.output_dir}/{self.date}_{self.mask_scheduler}_metrics.csv'
+            )
 
             emd = evaluate_emd(true_adata, pred_adata)
             self.log(
