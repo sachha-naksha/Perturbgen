@@ -4,11 +4,11 @@
 #BSUB -n 32 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
-#BSUB -o logs/count_GF_frozen_sin_learnt_%J.out # output file
-#BSUB -e logs/count_GF_frozen_sin_learnt_%J.err # error file
+#BSUB -o logs/count_GF_frozen_pos_sin_learnt_%J.out # output file
+#BSUB -e logs/count_GF_frozen_pos_sin_learnt_%J.err # error file
 #BSUB -M 50000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
-#BSUB -J cytoimmgen_count_GF_frozen_sin_learnt # job name
+#BSUB -J cytoimmgen_count_GF_frozen_pos_sin_learnt # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -63,7 +63,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --time_steps 1 3 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
---positional_encoding sin_learnt \
+--positional_encoding pos_sin_learnt \
 --seed 42 \
 --mask_scheduler 'cosine'
 echo "--- Finished computing model"

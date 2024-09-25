@@ -40,7 +40,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode stratified \
 --output_dir $RES_DIR/$RES_NAME/res \
---ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/positional_encoding/res/checkpoints/20240925_0209_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_mlmp_0.15_tp_1-3_s_42_pos_sin_learnt-epoch=09.ckpt" \
+--ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/masking_scheduler/res/checkpoints/20240920_1733_mask_exp_train_masking_lr_0.0001_wd_0.0001_batch_64_mlmp_0.15_tp_1-3_s_42-epoch=09.ckpt" \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt" \
 --src_adata "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_src/0h.h5ad" \
@@ -48,7 +48,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --mapping_dict_path  "./T_perturb/T_perturb/pp/res/cytoimmgen/token_id_to_genename_hvg.pkl" \
 --batch_size 64 \
 --max_len 300 \
---epochs 5 \
+--epochs 10 \
 --tgt_vocab_size 20274 \
 --cellgen_lr 0.0001 \
 --count_lr 0.005 \

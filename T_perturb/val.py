@@ -238,6 +238,12 @@ def get_args():
         help='context mode for timepoints',
     )
     parser.add_argument(
+        '--positional_encoding',
+        type=str,
+        default='time_pos_sin',
+        help='positional encoding',
+    )
+    parser.add_argument(
         '--guided_gene_list_dir',
         type=str,
         default=None,
@@ -545,6 +551,7 @@ def main() -> None:
             n_samples=3,
             mode=args.mode,
             seed=args.seed,
+            positional_encoding=args.positional_encoding,
             context_mode=args.context_mode,
             n_genes=tgt_adata_tmp.X.shape[1],
             guided_gene_list=token_dict,

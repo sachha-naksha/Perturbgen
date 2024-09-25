@@ -5,6 +5,7 @@ from typing import (
     Any,
     Dict,
     List,
+    Literal,
     Optional,
 )
 
@@ -73,6 +74,9 @@ class CellGenTrainer(LightningModule):
         mode: str = 'GF_fine_tuned',
         mask_scheduler: str = 'cosine',
         context_mode: bool = True,
+        positional_encoding: Literal[
+            'time_pos_sin', 'comb_sin', 'sin_learnt'
+        ] = 'time_pos_sin',
         var_list: Optional[List[str]] = None,
         gene_names: Optional[List[str]] = None,
         mapping_dict_path: Optional[str] = None,
@@ -95,6 +99,7 @@ class CellGenTrainer(LightningModule):
             total_time_steps=total_time_steps,
             mode=mode,
             mask_scheduler=mask_scheduler,
+            position_embedding=positional_encoding,
         )
         self.masking_loss = nn.CrossEntropyLoss()
         self.timepoint_loss = nn.CrossEntropyLoss()
@@ -445,7 +450,11 @@ class CountDecoderTrainer(LightningModule):
         seed: int = 42,
         context_mode: bool = True,
         n_genes: int = 25426,
+        positional_encoding: Literal[
+            'time_pos_sin', 'comb_sin', 'sin_learnt'
+        ] = 'time_pos_sin',
         mask_scheduler: Optional[str] = 'cosine',
+        return_rouge_score=False,
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
         ckpt_count_path: Optional[str] = None,
@@ -477,7 +486,9 @@ class CountDecoderTrainer(LightningModule):
             time_steps=time_steps,
             total_time_steps=total_time_steps,
             mode=mode,
+            position_embedding=positional_encoding,
         )
+        self.positional_encoding = positional_encoding
         # load PETRA checkpoint
         if ckpt_masking_path is not None:
             checkpoint = torch.load(ckpt_masking_path, map_location='cpu')
@@ -486,7 +497,9 @@ class CountDecoderTrainer(LightningModule):
             # set parameters to not trainable
             for param in pretrained_model.parameters():
                 param.requires_grad = False
-        self.rouge = rouge.ROUGEScore(rouge_keys='rouge1')
+        self.return_rouge_score = return_rouge_score
+        if self.return_rouge_score:
+            self.rouge = rouge.ROUGEScore(rouge_keys='rouge1')
         self.decoder = CountDecoder(
             pretrained_model=pretrained_model,
             loss_mode=loss_mode,
@@ -498,6 +511,7 @@ class CountDecoderTrainer(LightningModule):
             context_mode=context_mode,
             n_genes=n_genes,
         )
+        self.positional_encoding = positional_encoding
 
         if ckpt_count_path is not None:
             checkpoint = torch.load(ckpt_count_path, map_location='cpu')
@@ -550,11 +564,12 @@ class CountDecoderTrainer(LightningModule):
             'pred_counts': [],
             'cls_embeddings': [],
         }
-        self.seq_len_list = [25, 100, max_seq_length]
-        for seq_len in self.seq_len_list:
-            self.test_dict[f'rouge_f1_{seq_len}'] = []
-            self.test_dict[f'rouge_precision_{seq_len}'] = []
-            self.test_dict[f'rouge_recall_{seq_len}'] = []
+        if self.return_rouge_score:
+            self.seq_len_list = [25, 100, max_seq_length]
+            for seq_len in self.seq_len_list:
+                self.test_dict[f'rouge_f1_{seq_len}'] = []
+                self.test_dict[f'rouge_precision_{seq_len}'] = []
+                self.test_dict[f'rouge_recall_{seq_len}'] = []
         self.n_samples = n_samples
         if var_list is not None:
             self.var_list = var_list
@@ -863,74 +878,75 @@ class CountDecoderTrainer(LightningModule):
             )
 
             for time_step in pred_ids_dict.keys():
-                pred_ids = pred_ids_dict[time_step].cpu().numpy()
-                tgt_ids = batch[time_step].cpu().numpy()
-                # exclude task token and padding token
-                # exclude padding token
-                pred_ids = pred_ids[:, 1:]
-                special_tokens = np.array([0, 1, 2, 3])
-                pred_ids = pred_ids[~np.isin(pred_ids, special_tokens)].tolist()
-                tgt_ids = tgt_ids[:, 1:]
-                tgt_ids = tgt_ids[~np.isin(tgt_ids, special_tokens)].tolist()
-                pred_genes = [
-                    str(self.token_id_to_ensembl.get(idx, idx)) for idx in pred_ids
-                ]
-                true_genes = [
-                    str(self.token_id_to_ensembl.get(idx, idx)) for idx in tgt_ids
-                ]
-                pred_genes = ' '.join(pred_genes)
-                true_genes = ' '.join(true_genes)
-                # predict rouge score for different lengths: 25, 100, full length
-                for seq_len in self.seq_len_list:
-                    if self.max_seq_length > seq_len:
-                        pred_genes_short = pred_genes[:seq_len]
-                        true_genes_short = true_genes[:seq_len]
-                    else:
-                        pred_genes_short = pred_genes
-                        true_genes_short = true_genes
-                    rouge_score = self.rouge(pred_genes_short, true_genes_short)
-                    self.test_dict[f'rouge_f1_{seq_len}'].append(
-                        rouge_score['rouge1_fmeasure']
+                if self.return_rouge_score:
+                    pred_ids = pred_ids_dict[time_step].cpu().numpy()
+                    tgt_ids = batch[time_step].cpu().numpy()
+                    # exclude task token and padding token
+                    # exclude padding token
+                    pred_ids = pred_ids[:, 1:]
+                    special_tokens = np.array([0, 1, 2, 3])
+                    pred_ids = pred_ids[~np.isin(pred_ids, special_tokens)].tolist()
+                    tgt_ids = tgt_ids[:, 1:]
+                    tgt_ids = tgt_ids[~np.isin(tgt_ids, special_tokens)].tolist()
+                    pred_genes = [
+                        str(self.token_id_to_ensembl.get(idx, idx)) for idx in pred_ids
+                    ]
+                    true_genes = [
+                        str(self.token_id_to_ensembl.get(idx, idx)) for idx in tgt_ids
+                    ]
+                    pred_genes = ' '.join(pred_genes)
+                    true_genes = ' '.join(true_genes)
+                    # predict rouge score for different lengths: 25, 100, full length
+                    for seq_len in self.seq_len_list:
+                        if self.max_seq_length > seq_len:
+                            pred_genes_short = pred_genes[:seq_len]
+                            true_genes_short = true_genes[:seq_len]
+                        else:
+                            pred_genes_short = pred_genes
+                            true_genes_short = true_genes
+                        rouge_score = self.rouge(pred_genes_short, true_genes_short)
+                        self.test_dict[f'rouge_f1_{seq_len}'].append(
+                            rouge_score['rouge1_fmeasure']
+                        )
+                        self.test_dict[f'rouge_precision_{seq_len}'].append(
+                            rouge_score['rouge1_precision']
+                        )
+                        self.test_dict[f'rouge_recall_{seq_len}'].append(
+                            rouge_score['rouge1_recall']
+                        )
+                    self.log(
+                        'test/rouge_f1',
+                        rouge_score['rouge1_fmeasure'],
+                        on_step=False,
+                        on_epoch=True,
+                        prog_bar=True,
+                        logger=True,
+                        rank_zero_only=True,
+                        sync_dist=True,
+                        batch_size=batch['src_input_ids'].shape[0],
                     )
-                    self.test_dict[f'rouge_precision_{seq_len}'].append(
-                        rouge_score['rouge1_precision']
+                    self.log(
+                        'test/rouge_precision',
+                        rouge_score['rouge1_precision'],
+                        on_step=False,
+                        on_epoch=True,
+                        prog_bar=True,
+                        logger=True,
+                        rank_zero_only=True,
+                        sync_dist=True,
+                        batch_size=batch['src_input_ids'].shape[0],
                     )
-                    self.test_dict[f'rouge_recall_{seq_len}'].append(
-                        rouge_score['rouge1_recall']
+                    self.log(
+                        'test/rouge_recall',
+                        rouge_score['rouge1_recall'],
+                        on_step=False,
+                        on_epoch=True,
+                        prog_bar=True,
+                        logger=True,
+                        rank_zero_only=True,
+                        sync_dist=True,
+                        batch_size=batch['src_input_ids'].shape[0],
                     )
-                self.log(
-                    'test/rouge_f1',
-                    rouge_score['rouge1_fmeasure'],
-                    on_step=False,
-                    on_epoch=True,
-                    prog_bar=True,
-                    logger=True,
-                    rank_zero_only=True,
-                    sync_dist=True,
-                    batch_size=batch['src_input_ids'].shape[0],
-                )
-                self.log(
-                    'test/rouge_precision',
-                    rouge_score['rouge1_precision'],
-                    on_step=False,
-                    on_epoch=True,
-                    prog_bar=True,
-                    logger=True,
-                    rank_zero_only=True,
-                    sync_dist=True,
-                    batch_size=batch['src_input_ids'].shape[0],
-                )
-                self.log(
-                    'test/rouge_recall',
-                    rouge_score['rouge1_recall'],
-                    on_step=False,
-                    on_epoch=True,
-                    prog_bar=True,
-                    logger=True,
-                    rank_zero_only=True,
-                    sync_dist=True,
-                    batch_size=batch['src_input_ids'].shape[0],
-                )
 
             count_loss, pred_counts_dict = self.compute_count_loss(
                 outputs=outputs,
@@ -1020,7 +1036,7 @@ class CountDecoderTrainer(LightningModule):
                 f'random_pairing_stratified_pairing_generate_adata_'
                 f't{self.time_steps}_{self.mode}_s{self.seed}_'
                 f'l{self.loss_mode}_n{self.n_samples}'
-                f'_m{self.mask_scheduler}.h5ad'
+                f'_p{self.positional_encoding}.h5ad'
             )
             print('---anndata generation completed')
             # save metrics
@@ -1046,21 +1062,21 @@ class CountDecoderTrainer(LightningModule):
             )
             for metric in mmd_wasserstein:
                 metric_mean[metric + '_PCA'] = mmd_wasserstein[metric]
-
-            if self.test_dict[f'rouge_f1_{self.seq_len_list[0]}']:
-                for seq_len in self.seq_len_list:
-                    metric_mean[f'rouge_f1_{seq_len}'] = np.mean(
-                        self.test_dict[f'rouge_f1_{seq_len}']
-                    )
-                    metric_mean[f'rouge_precision_{seq_len}'] = np.mean(
-                        self.test_dict[f'rouge_precision_{seq_len}']
-                    )
-                    metric_mean[f'rouge_recall_{seq_len}'] = np.mean(
-                        self.test_dict[f'rouge_recall_{seq_len}']
-                    )
+            if self.return_rouge_score:
+                if self.test_dict[f'rouge_f1_{self.seq_len_list[0]}']:
+                    for seq_len in self.seq_len_list:
+                        metric_mean[f'rouge_f1_{seq_len}'] = np.mean(
+                            self.test_dict[f'rouge_f1_{seq_len}']
+                        )
+                        metric_mean[f'rouge_precision_{seq_len}'] = np.mean(
+                            self.test_dict[f'rouge_precision_{seq_len}']
+                        )
+                        metric_mean[f'rouge_recall_{seq_len}'] = np.mean(
+                            self.test_dict[f'rouge_recall_{seq_len}']
+                        )
             metrics = pd.DataFrame(metric_mean, index=[0])
             metrics.to_csv(
-                f'{self.output_dir}/{self.date}_{self.mask_scheduler}_metrics.csv'
+                f'{self.output_dir}/{self.date}_{self.positional_encoding}_metrics.csv'
             )
 
             emd = evaluate_emd(true_adata, pred_adata)

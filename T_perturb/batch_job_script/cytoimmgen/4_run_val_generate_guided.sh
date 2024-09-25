@@ -1,5 +1,5 @@
 #!/bin/bash
-#BSUB -q gpu-basement # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
 #BSUB -gpu 'mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu (:gmodel=NVIDIAA100_SXM4_80GB)
 #BSUB -n 32 # number of cores
 #BSUB -G teamtrynka # groupname for billing
@@ -24,14 +24,14 @@ echo '--- Start computing model'
 # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
 RES_NAME="cytoimmgen/generation"
-# if directory does not e
-echo create it with the name $RES_NAME
-mkdir -p $RES_DIR/$RES_NAME
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# copy the current script to the result directory
-cp $0 $RES_DIR/$RES_NAME/4_run_val_generate_temrapolation_$TIMESTAMP.sh
-echo "Copying script to $RES_DIR/$RES_NAME/4_run_val_generate_temrapolation_$TIMESTAMP.sh"
+# # if directory does not e
+# echo create it with the name $RES_NAME
+# mkdir -p $RES_DIR/$RES_NAME
+# # Get the current timestamp
+# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# # copy the current script to the result directory
+# cp $0 $RES_DIR/$RES_NAME/4_run_val_generate_temrapolation_$TIMESTAMP.sh
+# echo "Copying script to $RES_DIR/$RES_NAME/4_run_val_generate_temrapolation_$TIMESTAMP.sh"
 
 # ----------------- Interpolation -----------------
 # python3 $cwd/val.py \
@@ -47,7 +47,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --src_adata "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_src/0h.h5ad" \
 --tgt_adata_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_tgt" \
 --mapping_dict_path  "./T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl" \
---batch_size 256 \
+--batch_size 64 \
 --max_len 300 \
 --tgt_vocab_size 20274 \
 --cellgen_lr 0.0001 \
@@ -56,13 +56,13 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --count_wd 0.01 \
 --num_layers 6 \
 --loss_mode zinb \
---n_workers 32 \
+--n_workers 4 \
 --condition_keys Cell_culture_batch \
 --time_steps 1 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
 --mask_scheduler 'cosine' \
---guided_gene_list_dir "./T_perturb/T_perturb/iclr/cytoimmgen/generation/20240920_marker_genelist_cytoimmgen.csv" \
 --hvg_gene_list_dir "./T_perturb/T_perturb/iclr/cytoimmgen/generation/hvg_list.pkl" \
 --generate_cell_type 'TEMRA 16h'
 echo '--- Finished computing model'
+# --guided_gene_list_dir "./T_perturb/T_perturb/iclr/cytoimmgen/generation/20240920_marker_genelist_cytoimmgen.csv" \

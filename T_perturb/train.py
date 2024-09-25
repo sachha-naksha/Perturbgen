@@ -217,6 +217,13 @@ def get_args():
         help='mode of encoder',
     )
     parser.add_argument(
+        '--positional_encoding',
+        type=str,
+        default='time_pos_sin',
+        choices=['time_pos_sin', 'comb_sin', 'sin_learnt'],
+        help='positional encoding',
+    )
+    parser.add_argument(
         '--seed',
         type=int,
         default=42,
@@ -401,6 +408,7 @@ def main() -> None:
             output_dir=args.output_dir,
             mode=args.mode,
             context_mode=args.context_mode,
+            positional_encoding=args.positional_encoding,
         )
     elif args.train_mode == 'count':
         decoder_module = CountDecoderTrainer(
@@ -513,7 +521,7 @@ def main() -> None:
             f'{run_id}_train_{args.train_mode}_lr_{args.count_lr}_wd_{args.count_wd}_'
             f'batch_{args.batch_size}_'
             f'{args.loss_mode}_tp_{time_steps_str}_s_'
-            f'{args.seed}_mask_{args.mask_scheduler}'
+            f'{args.seed}_pos_{args.positional_encoding}'
         )
         if args.split:
             monitor_metric = 'val/mse'

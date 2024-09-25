@@ -57,55 +57,54 @@ from T_perturb.src.utils import (
 #         return drop_path(x, self.drop_prob, self.training)
 
 
-# class SinusoidalPositionalEncoding(nn.Module):
-#     def __init__(self, d_model: int, length: int):
-#         '''
-#         Description:
-#         ------------
-#         Positional encoding for the transformer model.
-#         Can be applied to distinguish between ranks and time steps.
+class SepSinPositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, length: int):
+        '''
+        Description:
+        ------------
+        Positional encoding for the transformer model.
+        Can be applied to distinguish between ranks and time steps.
 
-#         Parameters:
-#         -----------
-#         d_model: `int`
-#             Token embedding dimension.
-#         length: `int`
-#             Two options:
-#             - encoding positional information of the gene ranking:
-#                 length = total_vocab_size
-#             - encoding positional information of the time steps:
-#                 length = n_time_steps
+        Parameters:
+        -----------
+        d_model: `int`
+            Token embedding dimension.
+        length: `int`
+            Two options:
+            - encoding positional information of the gene ranking:
+                length = total_vocab_size
+            - encoding positional information of the time steps:
+                length = n_time_steps
 
-#         Returns:
-#         --------
-#         x: `torch.Tensor`
-#             Positional embeddings.
-#         '''
-#         # train time steps and interpolation timestep
-#         # TODO: Need to be changed if running the Encoder model
-#         super(SinusoidalPositionalEncoding, self).__init__()
+        Returns:
+        --------
+        x: `torch.Tensor`
+            Positional embeddings.
+        '''
+        # train time steps and interpolation timestep
+        # TODO: Need to be changed if running the Encoder model
+        super(SepSinPositionalEncoding, self).__init__()
 
-#         pe = torch.zeros(length, d_model)
-#         position = torch.arange(0, length, dtype=torch.float).unsqueeze(1)
-#         div_term = torch.exp(
-#             torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
-#         )
-#         pe[:, 0::2] = torch.sin(position * div_term)
-#         pe[:, 1::2] = torch.cos(position * div_term)
-#         self.register_buffer('pe', pe.unsqueeze(0))
+        pe = torch.zeros(length, d_model)
+        position = torch.arange(0, length, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe.unsqueeze(0))
 
-#     def forward(self, x, tgt_time_step=None):
-#         if tgt_time_step:
-#             pe = self.pe[:, tgt_time_step - 1]  # -1 to start from 0
-#             pe = pe.unsqueeze(0).expand(-1, x.size(1))
+    def forward(self, x, tgt_time_step=None):
+        if tgt_time_step:
+            pe = self.pe[:, tgt_time_step - 1]  # -1 to start from 0
+            pe = pe.unsqueeze(0).expand(x.size(0), x.size(1), -1)
+        else:
+            pe = self.pe[:, : x.size(1)]
 
-#         else:
-#             pe = self.pe[:, : x.size(1)]
-
-#         return x + pe
+        return x + pe
 
 
-class SinusoidalPositionalEncoding(nn.Module):
+class CombSinPositionalEncoding(nn.Module):
     def __init__(self, d_model, max_seq_length, n_time_steps, mode='GF_fine_tuned'):
         '''
         Description:
@@ -133,7 +132,7 @@ class SinusoidalPositionalEncoding(nn.Module):
         # train time steps and interpolation timestep
         # TODO: separate timestep positional encoding
         # and positional encoding for the ranks
-        super(SinusoidalPositionalEncoding, self).__init__()
+        super(CombSinPositionalEncoding, self).__init__()
         self.max_seq_length = max_seq_length
         if mode in ['GF_frozen', 'GF_fine_tuned']:
             total_seq_length = n_time_steps * max_seq_length
@@ -485,11 +484,13 @@ class Encoder(nn.Module):
         nlayers: int = 6,
         dropout: float = 0.02,
         d_ff: int = 512,
-        position_embedding: Literal['sinusoidal', 'learnt'] = 'sinusoidal',
+        position_embedding: Literal[
+            'time_pos_sin', 'comb_sin', 'sin_learnt'
+        ] = 'comb_sin',
     ):
         super().__init__()
         self.position_embedding = position_embedding
-        self.positional_encoding = SinusoidalPositionalEncoding(
+        self.positional_encoding = CombSinPositionalEncoding(
             d_model=d_model,
             max_seq_length=max_seq_length,
             n_time_steps=n_time_steps,
@@ -581,7 +582,9 @@ class CellGen(nn.Module):
         mask_scheduler: str = 'cosine',
         total_time_steps: int = 3,
         mode='GF_frozen',
-        position_embedding: Literal['sinusoidal', 'learnt'] = 'learnt',
+        position_embedding: Literal[
+            'time_pos_sin', 'comb_sin', 'sin_learnt'
+        ] = 'time_pos_sin',
     ):
         '''
         Description:
@@ -632,6 +635,33 @@ class CellGen(nn.Module):
             self.precision = torch.bfloat16
         else:
             self.precision = torch.float32
+        self.position_embedding = position_embedding
+
+        if self.position_embedding == 'time_pos_sin':
+            self.time_sin_pos_encoding = SepSinPositionalEncoding(
+                d_model=d_model,
+                length=total_time_steps,
+            )
+            self.pos_sin_pos_encoding = SepSinPositionalEncoding(
+                d_model=d_model,
+                length=max_seq_length,
+            )
+        elif self.position_embedding == 'sin_learnt':
+            self.time_sin_pos_encoding = SepSinPositionalEncoding(
+                d_model=d_model,
+                length=total_time_steps,
+            )
+            self.learnt_pos_encoding = LearntPositionalEncoding(
+                d_model=d_model,
+                max_seq_length=max_seq_length,
+            )
+        elif self.position_embedding == 'comb_sin':
+            self.comb_pos_encoding = CombSinPositionalEncoding(
+                d_model=d_model,
+                max_seq_length=max_seq_length,
+                n_time_steps=total_time_steps,
+                mode=mode,
+            )
         self.num_features = self.embed_dim = d_model
         self.mlm_probability = mlm_probability
         self.tgt_vocab_size = tgt_vocab_size
@@ -649,13 +679,6 @@ class CellGen(nn.Module):
         # total_vocab_size = total_vocab_size + 1  # add one for padding token
         self.token_embedding = nn.Embedding(total_vocab_size, d_model, padding_idx=0)
         self.position_embedding = position_embedding
-
-        self.positional_encoding = SinusoidalPositionalEncoding(
-            d_model=d_model,
-            max_seq_length=max_seq_length,
-            n_time_steps=total_time_steps,
-            mode=mode,
-        )
 
         if mode in ['GF_frozen', 'GF_fine_tuned']:
             self.encoder_layers = Geneformerwrapper(mode=mode)
@@ -861,7 +884,21 @@ class CellGen(nn.Module):
 
                 with torch.no_grad():
                     tgt_embedding = self.token_embedding(tgt_input_id)
-                    dec_embedding = self.positional_encoding(tgt_embedding, time_step)
+                    if self.position_embedding == 'time_pos_sin':
+                        dec_embedding = self.time_sin_pos_encoding(
+                            tgt_embedding, time_step
+                        )
+                        dec_embedding = self.pos_sin_pos_encoding(dec_embedding)
+                    elif self.position_embedding == 'sin_learnt':
+                        dec_embedding = self.time_sin_pos_encoding(
+                            tgt_embedding, time_step
+                        )
+                        dec_embedding = self.learnt_pos_encoding(dec_embedding)
+                    elif self.position_embedding == 'comb_sin':
+                        dec_embedding = self.comb_pos_encoding(
+                            tgt_embedding,
+                            tgt_time_step=time_step,
+                        )
                     # create context for the ones before the selected time step
                     # pad the rest
                     dec_outputs = self.call_decoder(
@@ -944,7 +981,22 @@ class CellGen(nn.Module):
                         tgt_pad_dict=tgt_pad_dict,
                     )
                 tgt_embedding = self.token_embedding(tgt_input_id)
-                tgt_embedding = self.positional_encoding(tgt_embedding, tgt_time_step)
+
+                if self.position_embedding == 'time_pos_sin':
+                    tgt_embedding = self.time_sin_pos_encoding(
+                        tgt_embedding, tgt_time_step
+                    )
+                    tgt_embedding = self.pos_sin_pos_encoding(tgt_embedding)
+                elif self.position_embedding == 'sin_learnt':
+                    tgt_embedding = self.time_sin_pos_encoding(
+                        tgt_embedding, tgt_time_step
+                    )
+                    tgt_embedding = self.learnt_pos_encoding(tgt_embedding)
+                elif self.position_embedding == 'comb_sin':
+                    tgt_embedding = self.comb_pos_encoding(
+                        tgt_embedding,
+                        tgt_time_step=tgt_time_step,
+                    )
                 # does not include any context
                 outputs = self.call_decoder(
                     enc_output=context_output if context_mode else enc_output,
@@ -1006,7 +1058,17 @@ class CellGen(nn.Module):
                 #     context_pad_dict = generate_pad_dict
 
             tgt_embedding = self.token_embedding(tgt_input_id)
-            tgt_embedding = self.positional_encoding(tgt_embedding, tgt_time_step)
+            if self.position_embedding == 'time_pos_sin':
+                tgt_embedding = self.time_sin_pos_encoding(tgt_embedding, tgt_time_step)
+                tgt_embedding = self.pos_sin_pos_encoding(tgt_embedding)
+            elif self.position_embedding == 'sin_learnt':
+                tgt_embedding = self.time_sin_pos_encoding(tgt_embedding, tgt_time_step)
+                tgt_embedding = self.learnt_pos_encoding(tgt_embedding)
+            elif self.position_embedding == 'comb_sin':
+                tgt_embedding = self.comb_pos_encoding(
+                    tgt_embedding,
+                    tgt_time_step=tgt_time_step,
+                )
             outputs = self.call_decoder(
                 enc_output=enc_output,
                 src_attention_mask=src_attention_mask,
@@ -1278,17 +1340,17 @@ class CountDecoder(nn.Module):
             tgt_input_id_dict_[tgt_input_id_key] = ids
             # pad ids
             scores = torch.zeros_like(tgt_input_id, dtype=torch.float)
-            cls_length = 1
+            prompt_length = 1
             # predict the first n genes in first iteration
             if guided_gene_list:
-                prompt_length = 10
+                prompt_length_tmp = 10
                 pad_tensor_ = pad_tensor.clone()
-                pad_tensor_[:, prompt_length:] = 0
+                pad_tensor_[:, prompt_length_tmp:] = 0
                 tgt_pad_ = self.generate_pad(pad_tensor_)
                 tgt_pad_dict_[f'tgt_pad_t{time_step}'] = tgt_pad_
 
                 # pad ids
-                ids[:, prompt_length:] = 0
+                ids[:, prompt_length_tmp:] = 0
                 tgt_input_id_dict_[tgt_input_id_key] = ids
                 # use a two-step process to decode the genes
                 outputs, ids_ = self.generate_sequence(
@@ -1305,11 +1367,12 @@ class CountDecoder(nn.Module):
                     tgt_time_step=time_step,
                     guided_gene_list=guided_gene_list,
                     hvg_gene_list=hvg_gene_list,
-                    prompt_length=cls_length,
+                    prompt_length=prompt_length,
                 )
                 # unpad the rest of ids
-                ids_[:, prompt_length:] = 1
+                ids_[:, prompt_length_tmp:] = 1
                 tgt_input_id_dict_[tgt_input_id_key] = ids_
+                prompt_length = prompt_length_tmp
 
             # generate the rest of the genes
             # use max shape instead of genes you like to generate
@@ -1426,7 +1489,7 @@ class CountDecoder(nn.Module):
             # mask scheduler function, gamma
             rand_mask_prob = noise_schedule(
                 ratio=iteration,
-                total_tokens=torch.tensor(total_tokens, device=tmp_ids.device),
+                total_tokens=total_tokens,
                 method=mask_scheduler,
             )
             # set score to -inf for padding tokens
@@ -1443,7 +1506,6 @@ class CountDecoder(nn.Module):
             for i in range(batch_size):
                 mask[i, indices_to_mask[i, : num_tokens_to_mask[i]]] = True
             tmp_ids = tmp_ids.masked_fill(mask, self.mask_token)
-            # print(tmp_ids[0, 25:])
             # keep indices which are not masked except for the CLS token
             ids_to_keep = torch.where(
                 mask,
@@ -1460,6 +1522,7 @@ class CountDecoder(nn.Module):
                 context_mode=self.context_mode,
             )
             logits = outputs['dec_logits'][:, prompt_length:, :]
+            print(min(logits.flatten()), max(logits.flatten()))
 
             all_genes = torch.arange(
                 logits.shape[-1], device=logits.device, dtype=torch.long
@@ -1482,6 +1545,29 @@ class CountDecoder(nn.Module):
                 genes_to_mask = all_genes[mask]
                 logits[:, :, genes_to_mask] = max_neg_value
             if guided_gene_list is not None:
+                # logits_prompt = logits[:, :total_tokens.max(), :]
+                # #choose the top n genes based on num_tokens_to_mask
+                # num_topk_genes = (
+                #     total_tokens.max() - num_tokens_to_mask.max()
+                #     ).long()*3
+                # if num_topk_genes > 0:
+                #     filtered_logits_prompt = top_k(
+                #         logits_prompt.clone(),
+                #         topk_filter_thres
+                #         )
+                #     temperature = starting_temperature * (
+                #         steps_until_x0 / iteration
+                #     )  # temperature is annealed
+                #     ids_to_sample = gumbel_sample(
+                #         filtered_logits_prompt,
+                #         temperature=temperature,
+                #         dim=-1
+                #         )
+                #     ids_to_sample_flat = ids_to_sample.flatten()
+                #     indices = torch.randperm(
+                #         ids_to_sample_flat.shape[0]
+                #         )[:num_topk_genes]
+                #     sampled_top_indices = ids_to_sample_flat[indices]
                 # set all the logits to -inf
                 # except for the genes in the guided gene list
                 # select all genes except the guided genes
@@ -1494,6 +1580,11 @@ class CountDecoder(nn.Module):
                     device=logits.device,
                     dtype=torch.long,
                 )
+                # if num_topk_genes > 0:
+                #     # include sample top indices
+                #     genes_to_keep = torch.cat(
+                #         [genes_to_keep, sampled_top_indices]
+                #     )
                 mask = ~torch.isin(all_genes, genes_to_keep)
                 genes_to_mask = all_genes[mask]
                 logits[:, :, genes_to_mask] = max_neg_value
@@ -1501,6 +1592,7 @@ class CountDecoder(nn.Module):
             tmp_ids_ = tmp_ids[:, prompt_length:].clone()
             scores_ = scores[:, prompt_length:].clone()
             ids_to_keep_ = ids_to_keep[:, prompt_length:].clone()
+
             # Create a mask of already predicted tokens
             for sample in range(logits.shape[0]):
                 unique_ids = torch.unique(ids_to_keep_[sample])

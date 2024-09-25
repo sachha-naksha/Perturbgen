@@ -4,11 +4,11 @@
 #BSUB -n 32 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
-#BSUB -o logs/count_GF_frozen_sin_learnt_%J.out # output file
-#BSUB -e logs/count_GF_frozen_sin_learnt_%J.err # error file
+#BSUB -o logs/count_GF_frozen_comb_sin_%J.out # output file
+#BSUB -e logs/count_GF_frozen_comb_sin_%J.err # error file
 #BSUB -M 50000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
-#BSUB -J cytoimmgen_count_GF_frozen_sin_learnt # job name
+#BSUB -J cytoimmgen_count_GF_frozen_comb_sin # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -40,7 +40,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --split False \
 --splitting_mode stratified \
 --output_dir $RES_DIR/$RES_NAME/res \
---ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/positional_encoding/res/checkpoints/20240925_0209_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_mlmp_0.15_tp_1-3_s_42_pos_sin_learnt-epoch=09.ckpt" \
+--ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/positional_encoding/res/checkpoints/20240925_0136_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_mlmp_0.15_tp_1-3_s_42_pos_comb_sin-epoch=09.ckpt" \
 --src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src/0h.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt" \
 --src_adata "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_src/0h.h5ad" \
@@ -63,7 +63,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --time_steps 1 3 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
---positional_encoding sin_learnt \
+--positional_encoding comb_sin \
 --seed 42 \
 --mask_scheduler 'cosine'
 echo "--- Finished computing model"
