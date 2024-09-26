@@ -12,6 +12,7 @@ from typing import (
 import anndata as ad
 import evaluate
 import numpy as np
+import ot as pot
 import pandas as pd
 import scanpy as sc
 import torch
@@ -457,6 +458,7 @@ class CountDecoderTrainer(LightningModule):
         seed: int = 42,
         context_mode: bool = True,
         n_genes: int = 25426,
+        count_mode: Literal['pca', 'count'] = 'count',
         positional_encoding: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
@@ -496,6 +498,7 @@ class CountDecoderTrainer(LightningModule):
             mode=mode,
             position_embedding=positional_encoding,
         )
+        self.count_mode = count_mode
         self.positional_encoding = positional_encoding
         # load PETRA checkpoint
         if ckpt_masking_path is not None:
@@ -619,7 +622,6 @@ class CountDecoderTrainer(LightningModule):
                 dim=1,
             )
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
-            print(tgt_input_id_)
         outputs = self.decoder(
             src_input_id=batch['src_input_ids'],
             tgt_input_id_dict=tgt_input_id_dict,
@@ -662,11 +664,6 @@ class CountDecoderTrainer(LightningModule):
         batch: Dict[str, torch.Tensor],
         n_samples: int = 1,
     ):
-        loss_list = []
-        count_dict = {}
-        dispersion = (
-            self.compute_dispersion(batch) if self.loss_mode in ['zinb', 'nb'] else None
-        )
         """
         Description:
         ------------
@@ -688,16 +685,25 @@ class CountDecoderTrainer(LightningModule):
         count_dict: `Dict[str, torch.Tensor]`
             dictionary containing predicted counts
         """
+        loss_list = []
+        count_dict = {}
+        dispersion = (
+            self.compute_dispersion(batch) if self.loss_mode in ['zinb', 'nb'] else None
+        )
+
         for time_step in self.time_steps:
             count_ouput = outputs[f'count_output_t{time_step}']
-            true_counts = batch[f'tgt_counts_t{time_step}']
+            if self.count_mode == 'pca':
+                true_values = batch[f'tgt_pca_t{time_step}']
+            else:
+                true_values = batch[f'tgt_counts_t{time_step}']
             batch_size_factor = batch[f'tgt_size_factor_t{time_step}']
 
             if self.loss_mode == 'mse':
                 # change true counts dtype to count output dtype
-                true_counts = true_counts.type(count_ouput['count_lognorm'].dtype)
+                true_values = true_values.type(count_ouput['count_lognorm'].dtype)
                 loss = (
-                    mse_loss(count_ouput['count_lognorm'], true_counts)
+                    mse_loss(count_ouput['count_lognorm'], true_values)
                     .sum(dim=-1)
                     .mean()
                     .float()
@@ -716,7 +722,7 @@ class CountDecoderTrainer(LightningModule):
                         theta=dispersion,
                         zi_logits=dec_dropout,
                     )
-                    loss = -zinb_distribution.log_prob(true_counts).sum(dim=-1).mean()
+                    loss = -zinb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
                         count_dict[time_step] = dec_mean
                     else:
@@ -726,7 +732,7 @@ class CountDecoderTrainer(LightningModule):
 
                 elif self.loss_mode == 'nb':
                     nb_distribution = NegativeBinomial(mu=dec_mean, theta=dispersion)
-                    loss = -nb_distribution.log_prob(true_counts).sum(dim=-1).mean()
+                    loss = -nb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
                         count_dict[time_step] = dec_mean
                     else:
@@ -753,12 +759,18 @@ class CountDecoderTrainer(LightningModule):
         mse_all = []
         for time_step in self.time_steps:
             pred_count = pred_counts_dict[time_step]
-            true_count = batch[f'tgt_counts_t{time_step}']
+            if self.count_mode == 'pca':
+                true_count = batch[f'tgt_pca_t{time_step}']
+            else:
+                true_count = batch[f'tgt_counts_t{time_step}']
             # MSE
             mse = self.mse(pred_count, true_count)
             mse_all.append(mse)
             # gather for validation step
-            self.train_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
+            if self.count_mode == 'pca':
+                self.train_true_counts_list.append(batch[f'tgt_pca_t{time_step}'])
+            else:
+                self.train_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
             self.train_pred_counts_list.append(pred_count)
 
         mean_mse = torch.mean(torch.stack(mse_all))
@@ -789,21 +801,15 @@ class CountDecoderTrainer(LightningModule):
             logger=True,
             sync_dist=True,
         )
-        # # create anndata
-        # pred_adata = ad.AnnData(
-        #     X=true_counts.numpy()
-        # )
-        # true_adata = ad.AnnData(
-        #     X=pred_counts.numpy()
-        # )
-        # emd_df = evaluate_emd(true_adata, pred_adata)
-        # self.log(
-        #     'test/emd',
-        #     emd_df['emd'].mean(),
-        #     on_epoch=True,
-        #     prog_bar=True,
-        #     logger=True,
-        # )
+        # # EMD
+        # a, b = pot.unif(true_counts.shape[0]), pot.unif(pred_counts.shape[0])
+        # if true_counts.dim() > 2:
+        #     true_counts = true_counts.reshape(true_counts.shape[0], -1)
+        # if pred_counts.dim() > 2:
+        #     pred_counts = pred_counts.reshape(pred_counts.shape[0], -1)
+        # M = torch.cdist(true_counts, pred_counts)
+        # ret = pot.emd2(a, b, M.detach().cpu().numpy(), numItermax=1e7)
+
         # set to status quo
         self.train_true_counts_list = []
         self.train_pred_counts_list = []
@@ -985,7 +991,10 @@ class CountDecoderTrainer(LightningModule):
             mse_all = []
             for time_step in self.time_steps:
                 pred_count = pred_counts_dict[time_step]
-                true_count = batch[f'tgt_counts_t{time_step}']
+                if self.count_mode == 'pca':
+                    true_count = batch[f'tgt_pca_t{time_step}']
+                else:
+                    true_count = batch[f'tgt_counts_t{time_step}']
                 # MSE
                 mse = self.mse(pred_count, true_count)
                 mse_all.append(mse)
@@ -1036,6 +1045,28 @@ class CountDecoderTrainer(LightningModule):
         # TODO: clean up no if and else needed
         true_counts = torch.cat(self.test_dict['true_counts']).detach().cpu()
         pred_counts = torch.cat(self.test_dict['pred_counts']).detach().cpu()
+        # select only the first 5 PCs
+        true_counts = true_counts[:, :5]
+        pred_counts = pred_counts[:, :5]
+        # compute emd
+        # EMD
+        a, b = pot.unif(true_counts.shape[0]), pot.unif(pred_counts.shape[0])
+        if true_counts.dim() > 2:
+            true_counts = true_counts.reshape(true_counts.shape[0], -1)
+        if pred_counts.dim() > 2:
+            pred_counts = pred_counts.reshape(pred_counts.shape[0], -1)
+        M = torch.cdist(true_counts, pred_counts)
+        ret = pot.emd2(a, b, M.detach().cpu().numpy(), numItermax=1e7)
+        self.log(
+            'test/emd',
+            ret,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+        print('---EMD:', ret)
+
         if self.generate:
             print('---Generating anndata')
 

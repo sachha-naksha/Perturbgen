@@ -67,7 +67,16 @@ def get_args():
         default=None,
         help='path to checkpoint',
     )
-
+    parser.add_argument(
+        '--count_mode',
+        default='pca',
+        type=str,
+        choices=[
+            'count',
+            'pca',
+        ],
+        help='mode of count decoder',
+    )
     parser.add_argument(
         '--src_dataset',
         type=str,
@@ -384,6 +393,10 @@ def main() -> None:
     print('Data loaded and preprocessed.')
     # count number of unique timepoints
     n_total_timepoints = len(tgt_adatas)
+    if args.count_mode == 'count':
+        num_genes = tgt_adata_tmp.X.shape[1]
+    elif args.count_mode == 'pca':
+        num_genes = tgt_adata_tmp.obsm['X_pca_scaled'].shape[1]
     # Initialize model module
     # ----------------------------------------------------------------------------------
     if args.train_mode == 'masking':
@@ -437,8 +450,10 @@ def main() -> None:
             output_dir=args.output_dir,
             mode=args.mode,
             seed=args.seed,
+            n_genes=num_genes,
             context_mode=args.context_mode,
-            n_genes=tgt_adata_tmp.X.shape[1],
+            count_mode=args.count_mode,
+            positional_encoding=args.positional_encoding,
         )
     else:
         raise ValueError('train_mode not recognised, needs to be masking or count')

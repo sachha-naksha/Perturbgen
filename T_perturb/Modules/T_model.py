@@ -1124,7 +1124,7 @@ class CountHead(nn.Module):
         self,
         loss_mode: str = 'zinb',
         n_genes: int = 25426,
-        d_model: int = 256,
+        d_model: int = 256,  # 256
         dropout: float = 0.0,
     ):
         '''
@@ -1154,11 +1154,18 @@ class CountHead(nn.Module):
 
         self.mlp = Mlp(
             in_features=d_model,
-            hidden_features=d_model,
+            hidden_features=2048,
+            out_features=512,
             drop=dropout,
         )
         if self.loss_mode == 'mse':
-            self.relu_output = nn.Sequential(nn.Linear(d_model, n_genes), nn.ReLU())
+            self.relu_output = nn.Sequential(
+                nn.Linear(512, 256),
+                nn.ReLU(),
+                nn.Linear(256, n_genes),
+                nn.LayerNorm(n_genes),
+                nn.ReLU(),
+            )
         elif self.loss_mode == 'zinb':
             self.linear_output = nn.Linear(d_model, n_genes)
             self.softmax_output = nn.Sequential(
@@ -1190,7 +1197,7 @@ class CountDecoder(nn.Module):
         pretrained_model: nn.Module = None,
         loss_mode: str = 'zinb',
         tgt_vocab_size: int = 25426,
-        d_model: int = 256,
+        d_model: int = 128,
         add_mask_id: bool = True,
         dropout: float = 0.0,
         time_steps: list = [1, 2],

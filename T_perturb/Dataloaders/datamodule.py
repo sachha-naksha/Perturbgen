@@ -165,7 +165,6 @@ class CellGenDataModule(LightningDataModule):
         self.tgt_counts_dict = tgt_counts_dict
         self.src_pca = src_pca
         self.tgt_pca_dict = tgt_pca_dict
-        print('src_pca', src_pca)
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle

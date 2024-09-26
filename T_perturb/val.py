@@ -226,6 +226,16 @@ def get_args():
         help='mode of encoder',
     )
     parser.add_argument(
+        '--count_mode',
+        default='pca',
+        type=str,
+        choices=[
+            'count',
+            'pca',
+        ],
+        help='mode of count decoder',
+    )
+    parser.add_argument(
         '--seed',
         type=int,
         default=42,
@@ -503,6 +513,12 @@ def main() -> None:
     # count number of unique timepoints
     n_total_timepoints = len(tgt_adatas)
 
+    if args.count_mode == 'count':
+        num_genes = tgt_adata_tmp.X.shape[1]
+    elif args.count_mode == 'pca':
+        num_genes = tgt_adata_tmp.obsm['X_pca_scaled'].shape[1]
+    print(f'Number of genes: {num_genes}')
+
     # Initialize model module
     # ----------------------------------------------------------------------------------
     if args.test_mode == 'masking':
@@ -562,7 +578,8 @@ def main() -> None:
             seed=args.seed,
             positional_encoding=args.positional_encoding,
             context_mode=args.context_mode,
-            n_genes=tgt_adata_tmp.X.shape[1],
+            n_genes=num_genes,
+            count_mode=args.count_mode,
             unique_gene_list=unique_token_dict,
             shared_gene_list=shared_token_dict,
             hvg_gene_list=hvg_gene_list,
@@ -586,6 +603,8 @@ def main() -> None:
         tgt_datasets=tgt_datasets,
         src_counts=src_counts,
         tgt_counts_dict=tgt_counts_dict,
+        src_pca=src_adata.obsm['X_pca_scaled'],
+        tgt_pca_dict={k: v.obsm['X_pca_scaled'] for k, v in tgt_adatas.items()},
         batch_size=args.batch_size,
         num_workers=args.n_workers,
         shuffle=args.shuffle,

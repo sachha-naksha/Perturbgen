@@ -58,7 +58,7 @@ python3 $cwd/val.py \
 --count_wd 0.0001 \
 --num_layers 2 \
 --d_ff 16 \
---loss_mode mse \
+--loss_mode zinb \
 --n_workers 32 \
 --time_steps 3 \
 --var_list Time_point \
