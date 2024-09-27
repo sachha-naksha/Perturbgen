@@ -68,16 +68,6 @@ def get_args():
         help='path to checkpoint',
     )
     parser.add_argument(
-        '--count_mode',
-        default='pca',
-        type=str,
-        choices=[
-            'count',
-            'pca',
-        ],
-        help='mode of count decoder',
-    )
-    parser.add_argument(
         '--src_dataset',
         type=str,
         default='./T_perturb/T_perturb/pp/res/eb/dataset_hvg_src/Day 00-03.dataset',
@@ -393,10 +383,7 @@ def main() -> None:
     print('Data loaded and preprocessed.')
     # count number of unique timepoints
     n_total_timepoints = len(tgt_adatas)
-    if args.count_mode == 'count':
-        num_genes = tgt_adata_tmp.X.shape[1]
-    elif args.count_mode == 'pca':
-        num_genes = tgt_adata_tmp.obsm['X_pca_scaled'].shape[1]
+
     # Initialize model module
     # ----------------------------------------------------------------------------------
     if args.train_mode == 'masking':
@@ -450,9 +437,8 @@ def main() -> None:
             output_dir=args.output_dir,
             mode=args.mode,
             seed=args.seed,
-            n_genes=num_genes,
+            n_genes=src_adata.shape[1],
             context_mode=args.context_mode,
-            count_mode=args.count_mode,
             positional_encoding=args.positional_encoding,
         )
     else:
@@ -468,14 +454,16 @@ def main() -> None:
     for keys, tgt_adata in tgt_adatas.items():
         tgt_counts_dict[keys] = tgt_adata.X
     src_counts = src_adata.X
-
+    # determine global batch size to account for multiple GPUs
+    gpu_number = max(torch.cuda.device_count(), 1)
+    per_gpu_batch_size = args.batch_size // gpu_number
     if args.train_mode == 'masking':
         data_module = CellGenDataModule(
             src_dataset=src_dataset,
             tgt_datasets=tgt_datasets,
             src_counts=src_counts,  # TODO: do not pass counts in datamodule
             tgt_counts_dict=tgt_counts_dict,
-            batch_size=args.batch_size,
+            batch_size=per_gpu_batch_size,
             num_workers=args.n_workers,
             shuffle=args.shuffle,
             max_len=args.max_len,
@@ -494,9 +482,7 @@ def main() -> None:
             tgt_datasets=tgt_datasets,
             src_counts=src_counts,
             tgt_counts_dict=tgt_counts_dict,
-            src_pca=src_adata.obsm['X_pca_scaled'],
-            tgt_pca_dict={k: v.obsm['X_pca_scaled'] for k, v in tgt_adatas.items()},
-            batch_size=args.batch_size,
+            batch_size=per_gpu_batch_size,
             num_workers=args.n_workers,
             shuffle=args.shuffle,
             max_len=args.max_len,
@@ -527,7 +513,8 @@ def main() -> None:
         filename = (
             f'{run_id}_train_{args.train_mode}_lr_{args.cellgen_lr}'
             f'_wd_{args.cellgen_wd}_batch_{args.batch_size}_'
-            f'mlmp_{args.mlm_prob}_tp_{time_steps_str}_s_{args.seed}'
+            f'p{args.positional_encoding}_m_{args.mask_scheduler}'
+            f'_tp_{time_steps_str}_s_{args.seed}'
         )
         if args.split:
             monitor_metric = 'val/perplexity'
@@ -539,7 +526,7 @@ def main() -> None:
             f'{run_id}_train_{args.train_mode}_lr_{args.count_lr}_wd_{args.count_wd}_'
             f'batch_{args.batch_size}_'
             f'{args.loss_mode}_tp_{time_steps_str}_s_'
-            f'{args.seed}_pos_{args.positional_encoding}'
+            f'{args.seed}_pos_{args.positional_encoding}_m_{args.mask_scheduler}'
         )
         if args.split:
             monitor_metric = 'val/mse'

@@ -42,10 +42,10 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --generate False \
 --ckpt_masking_path "./T_perturb/T_perturb/iclr/cytoimmgen/embedding_analysis/res/checkpoints/20240927_1101_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_psin_learnt_m_cosine_tp_1-2-3_s_42-epoch=09.ckpt" \
 --output_dir $RES_DIR/$RES_NAME/res \
---src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_subsetted_src/0h.dataset" \
---tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_subsetted_tgt" \
---src_adata "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_src/0h.h5ad" \
---tgt_adata_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_tgt" \
+--src_dataset "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_src_4096/0h.dataset" \
+--tgt_dataset_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/dataset_hvg_tgt_4096" \
+--src_adata "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_src_4096/0h.h5ad" \
+--tgt_adata_folder "./T_perturb/T_perturb/pp/res/cytoimmgen/h5ad_pairing_hvg_tgt_4096" \
 --batch_size 256 \
 --max_len 300 \
 --tgt_vocab_size 1254 \
@@ -60,7 +60,5 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --time_steps 1 2 3 \
 --var_list Cell_population Cell_type Time_point Donor \
 --mode GF_frozen \
---context_mode True \
---mask_scheduler 'cosine' \
---positional_encoding 'sin_learnt'
+--context_mode True
 echo "--- Finished computing model"

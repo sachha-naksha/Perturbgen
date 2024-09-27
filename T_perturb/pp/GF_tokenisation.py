@@ -34,15 +34,15 @@ def get_args():
     parser.add_argument(
         '--h5ad_path',
         type=str,
-        # default='./data/h5d_files/cytoimmgen.h5ad',
-        default='./data/20240423_eb/EB.h5ad',
+        default='./data/h5d_files/cytoimmgen.h5ad',
+        # default='./data/20240423_eb/EB.h5ad',
         help='Path to h5ad file',
     )
     parser.add_argument(
         '--dataset',
         type=str,
-        # default='cytoimmgen',
-        default='eb',
+        default='cytoimmgen',
+        # default='eb',
         choices=['cytoimmgen', 'eb'],
     )
     parser.add_argument(
@@ -56,29 +56,29 @@ def get_args():
         '--var_list',
         type=str,
         nargs='+',
-        # default=[
-        #     'Cell_population',
-        #     'Cell_type',
-        #     'Time_point',
-        #     'Age',
-        #     'Sex',
-        #     'batch',
-        #     'Cell_culture_batch',
-        #     'Phase',
-        #     'Donor',
-        #     'cell_pairing_index',
-        # ],
         default=[
+            'Cell_population',
+            'Cell_type',
             'Time_point',
+            'Age',
+            'Sex',
+            'batch',
+            'Cell_culture_batch',
+            'Phase',
+            'Donor',
             'cell_pairing_index',
         ],
+        # default=[
+        #     'Time_point',
+        #     'cell_pairing_index',
+        # ],
         help='List of variables to keep in the dataset',
     )
     parser.add_argument(
         '--pairing_mode',
         type=str,
-        # default='stratified',
-        default='random',
+        default='stratified',
+        # default='random',
         choices=['stratified', 'random'],
         help='Cell pairing mode',
     )
@@ -91,27 +91,27 @@ def get_args():
     parser.add_argument(
         '--reference_time',
         type=str,
-        # default='0h',
-        default='Day 00-03',
+        default='0h',
+        # default='Day 00-03',
         help='Control time point for cell pairing' 'which is feed into Geneformer',
     )
     parser.add_argument(
         '--time_point_order',
         type=str,
         nargs='+',
-        # default=[
-        #     '0h',
-        #     '16h',
-        #     '40h',
-        #     '5d',
-        # ],
         default=[
-            'Day 00-03',
-            'Day 06-09',
-            'Day 12-15',
-            'Day 18-21',
-            'Day 24-27',
+            '0h',
+            '16h',
+            '40h',
+            '5d',
         ],
+        # default=[
+        #     'Day 00-03',
+        #     'Day 06-09',
+        #     'Day 12-15',
+        #     'Day 18-21',
+        #     'Day 24-27',
+        # ],
         help='Order of time points in the dataset',
     )
     parser.add_argument(
@@ -152,12 +152,6 @@ if args.gene_filtering_mode == 'hvg':
     adata.layers['counts'] = adata.X.copy()
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
-    # compute PCS on all genes
-    sc.pp.pca(adata, n_comps=100)
-    # scale PC
-    coords = adata.obsm['X_pca']
-    coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
-    adata.obsm['X_pca_scaled'] = coords
     sc.pp.highly_variable_genes(adata, n_top_genes=2000)
     adata = adata[:, adata.var['highly_variable']].copy()
     adata.X = adata.layers['counts']  # need raw counts
@@ -255,6 +249,11 @@ adata.obs['n_counts'] = adata.X.sum(axis=1)
 
 adata.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad')
 
+# load adata
+adata = sc.read_h5ad(
+    f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
+)
+
 # subset adata to only genes in the token dictionary
 # filter adata for only genes occuring in the token dictionary
 (adata_subset, token_id_to_row_id_dict, row_id_to_gene_name) = tokenid_mapping(
@@ -332,7 +331,7 @@ dataset_mapped = dataset.map(
     lambda example: map_input_ids_to_row_id(
         example, token_id_to_row_id_dict, ignore_tokens=[2]
     ),
-    num_proc=8,
+    num_proc=4,
 )
 n_tgt_iter = 1  # for enumerating the timepoints
 for time_point in tqdm.tqdm(args.time_point_order):

@@ -25,13 +25,13 @@ cwd=$(pwd)
 # # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
 RES_NAME="eb/interpolation"
-# # if directory does not exist, create it with the name $RES_NAME
-# mkdir -p $RES_DIR/$RES_NAME
-# # Get the current timestamp
-# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# # copy the current script to the result directory
-# cp $0 $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_interpolation_$TIMESTAMP.sh
-# echo "Copying script to $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_interpolation_$TIMESTAMP.sh"
+# if directory does not exist, create it with the name $RES_NAME
+mkdir -p $RES_DIR/$RES_NAME
+# Get the current timestamp
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# copy the current script to the result directory
+cp $0 $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_interpolation_$TIMESTAMP.sh
+echo "Copying script to $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_interpolation_$TIMESTAMP.sh"
 
 # export WANDB_DIR=$cwd/wandb
 # Run python script to PETRA

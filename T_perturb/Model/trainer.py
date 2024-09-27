@@ -12,7 +12,6 @@ from typing import (
 import anndata as ad
 import evaluate
 import numpy as np
-import ot as pot
 import pandas as pd
 import scanpy as sc
 import torch
@@ -458,12 +457,12 @@ class CountDecoderTrainer(LightningModule):
         seed: int = 42,
         context_mode: bool = True,
         n_genes: int = 25426,
-        count_mode: Literal['pca', 'count'] = 'count',
         positional_encoding: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
         mask_scheduler: Optional[str] = 'cosine',
-        return_rouge_score=False,
+        sequence_length: int = 2048,
+        return_rouge_score=True,
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
         ckpt_count_path: Optional[str] = None,
@@ -471,7 +470,6 @@ class CountDecoderTrainer(LightningModule):
         conditions_combined: Optional[List[Any]] = None,
         unique_gene_list: Optional[Dict[Any, Any]] = None,
         shared_gene_list: Optional[Dict[Any, Any]] = None,
-        hvg_gene_list: Optional[dict] = None,
         *args,
         **kwargs,
     ):
@@ -498,7 +496,6 @@ class CountDecoderTrainer(LightningModule):
             mode=mode,
             position_embedding=positional_encoding,
         )
-        self.count_mode = count_mode
         self.positional_encoding = positional_encoding
         # load PETRA checkpoint
         if ckpt_masking_path is not None:
@@ -567,6 +564,7 @@ class CountDecoderTrainer(LightningModule):
         self.mask_scheduler = mask_scheduler
         self.temperature = temperature
         self.iterations = iterations
+        self.sequence_length = sequence_length
 
         self.test_dict: Dict[str, List[Any]] = {
             'true_counts': [],
@@ -607,7 +605,6 @@ class CountDecoderTrainer(LightningModule):
 
         self.unique_gene_list = unique_gene_list
         self.shared_gene_list = shared_gene_list
-        self.hvg_gene_list = hvg_gene_list
 
     def forward(self, batch):
         tgt_input_id_dict = {}
@@ -693,10 +690,7 @@ class CountDecoderTrainer(LightningModule):
 
         for time_step in self.time_steps:
             count_ouput = outputs[f'count_output_t{time_step}']
-            if self.count_mode == 'pca':
-                true_values = batch[f'tgt_pca_t{time_step}']
-            else:
-                true_values = batch[f'tgt_counts_t{time_step}']
+            true_values = batch[f'tgt_counts_t{time_step}']
             batch_size_factor = batch[f'tgt_size_factor_t{time_step}']
 
             if self.loss_mode == 'mse':
@@ -759,18 +753,12 @@ class CountDecoderTrainer(LightningModule):
         mse_all = []
         for time_step in self.time_steps:
             pred_count = pred_counts_dict[time_step]
-            if self.count_mode == 'pca':
-                true_count = batch[f'tgt_pca_t{time_step}']
-            else:
-                true_count = batch[f'tgt_counts_t{time_step}']
+            true_count = batch[f'tgt_counts_t{time_step}']
             # MSE
             mse = self.mse(pred_count, true_count)
             mse_all.append(mse)
             # gather for validation step
-            if self.count_mode == 'pca':
-                self.train_true_counts_list.append(batch[f'tgt_pca_t{time_step}'])
-            else:
-                self.train_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
+            self.train_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
             self.train_pred_counts_list.append(pred_count)
 
         mean_mse = torch.mean(torch.stack(mse_all))
@@ -801,15 +789,6 @@ class CountDecoderTrainer(LightningModule):
             logger=True,
             sync_dist=True,
         )
-        # # EMD
-        # a, b = pot.unif(true_counts.shape[0]), pot.unif(pred_counts.shape[0])
-        # if true_counts.dim() > 2:
-        #     true_counts = true_counts.reshape(true_counts.shape[0], -1)
-        # if pred_counts.dim() > 2:
-        #     pred_counts = pred_counts.reshape(pred_counts.shape[0], -1)
-        # M = torch.cdist(true_counts, pred_counts)
-        # ret = pot.emd2(a, b, M.detach().cpu().numpy(), numItermax=1e7)
-
         # set to status quo
         self.train_true_counts_list = []
         self.train_pred_counts_list = []
@@ -890,13 +869,12 @@ class CountDecoderTrainer(LightningModule):
             decoder_args = {
                 'src_input_id': batch['src_input_ids'],
                 'tgt_input_id_dict': tgt_input_id_dict,
-                'max_len': self.max_seq_length,
                 'mask_scheduler': self.mask_scheduler,
                 'can_remask_prev_masked': False,
                 'topk_filter_thres': 0.9,
                 'temperature': self.temperature,
                 'iterations': self.iterations,
-                'hvg_gene_list': self.hvg_gene_list,
+                'sequence_length': self.sequence_length,
             }
             if (self.unique_gene_list is not None) or (
                 self.shared_gene_list is not None
@@ -991,10 +969,8 @@ class CountDecoderTrainer(LightningModule):
             mse_all = []
             for time_step in self.time_steps:
                 pred_count = pred_counts_dict[time_step]
-                if self.count_mode == 'pca':
-                    true_count = batch[f'tgt_pca_t{time_step}']
-                else:
-                    true_count = batch[f'tgt_counts_t{time_step}']
+
+                true_count = batch[f'tgt_counts_t{time_step}']
                 # MSE
                 mse = self.mse(pred_count, true_count)
                 mse_all.append(mse)
@@ -1045,28 +1021,6 @@ class CountDecoderTrainer(LightningModule):
         # TODO: clean up no if and else needed
         true_counts = torch.cat(self.test_dict['true_counts']).detach().cpu()
         pred_counts = torch.cat(self.test_dict['pred_counts']).detach().cpu()
-        # select only the first 5 PCs
-        true_counts = true_counts[:, :5]
-        pred_counts = pred_counts[:, :5]
-        # compute emd
-        # EMD
-        a, b = pot.unif(true_counts.shape[0]), pot.unif(pred_counts.shape[0])
-        if true_counts.dim() > 2:
-            true_counts = true_counts.reshape(true_counts.shape[0], -1)
-        if pred_counts.dim() > 2:
-            pred_counts = pred_counts.reshape(pred_counts.shape[0], -1)
-        M = torch.cdist(true_counts, pred_counts)
-        ret = pot.emd2(a, b, M.detach().cpu().numpy(), numItermax=1e7)
-        self.log(
-            'test/emd',
-            ret,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        print('---EMD:', ret)
-
         if self.generate:
             print('---Generating anndata')
 
@@ -1093,7 +1047,8 @@ class CountDecoderTrainer(LightningModule):
                 f'random_pairing_stratified_pairing_generate_adata_'
                 f't{self.time_steps}_{self.mode}_s{self.seed}_'
                 f'l{self.loss_mode}_n{self.n_samples}'
-                f'_p{self.positional_encoding}.h5ad'
+                f'_p{self.positional_encoding}_'
+                f'm{self.mask_scheduler}_s{self.sequence_length}.h5ad'
             )
             print('---anndata generation completed')
             print('---Start saving metrics')
@@ -1151,7 +1106,9 @@ class CountDecoderTrainer(LightningModule):
             mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
             metrics = pd.concat([metrics, emd_df, lin_reg_df, mmd_df], axis=1)
             metrics.to_csv(
-                f'{self.output_dir}/{self.date}_p{self.positional_encoding}_metrics.csv'
+                f'{self.output_dir}/{self.date}_p{self.positional_encoding}_'
+                f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
+                '_s{self.sequence_length}_metrics.csv'
             )
 
         else:

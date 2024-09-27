@@ -43,9 +43,7 @@ class CellGenDataset(Dataset):
         tgt_datasets: DatasetDict,
         time_steps: list = [1, 2],
         src_counts: Optional[np.ndarray] = None,
-        src_pca: Optional[np.ndarray] = None,
         tgt_counts_dict: Optional[np.ndarray] = None,
-        tgt_pca_dict: Optional[np.ndarray] = None,
         split_indices: Optional[list] = None,
         conditions: Optional[torch.Tensor] = None,
         conditions_combined: Optional[torch.Tensor] = None,
@@ -66,11 +64,8 @@ class CellGenDataset(Dataset):
             self.src_dataset = src_dataset.select(split_indices)
             self.tgt_datasets = {}
             self.tgt_counts_dict = {}
-            self.tgt_pca_dict = {}
             if self.src_counts is not None:
                 self.src_counts = self.src_counts[split_indices, :]
-            if src_pca is not None:
-                self.src_pca = src_pca[split_indices, :]
 
             for t in time_steps:
                 dataset_keys_ = f'tgt_dataset_t{t}'
@@ -80,10 +75,6 @@ class CellGenDataset(Dataset):
                 )
                 if tgt_counts_dict is not None:
                     self.tgt_counts_dict[count_keys_] = tgt_counts_dict[count_keys_][
-                        split_indices, :
-                    ]
-                if tgt_pca_dict is not None:
-                    self.tgt_pca_dict[count_keys_] = tgt_pca_dict[count_keys_][
                         split_indices, :
                     ]
         if max(time_steps) > len(tgt_datasets):
@@ -98,7 +89,6 @@ class CellGenDataset(Dataset):
         out = {
             'src_dataset': self.src_dataset[ind],
             'src_counts': self.src_counts[ind] if self.src_counts is not None else None,
-            'src_pca': self.src_pca[ind] if self.src_pca is not None else None,
             'conditions': self.conditions[ind] if self.conditions is not None else None,
             'conditions_combined': self.conditions_combined[ind]
             if self.conditions_combined is not None
@@ -113,13 +103,6 @@ class CellGenDataset(Dataset):
                 out[f'tgt_counts_t{t}'] = self.tgt_counts_dict[f'tgt_h5ad_t{t}'][ind]
             else:
                 out[f'tgt_counts_t{t}'] = None
-            if (self.tgt_pca_dict is not None) and (
-                f'tgt_h5ad_t{t}' in self.tgt_pca_dict
-            ):
-                out[f'tgt_pca_t{t}'] = self.tgt_pca_dict[f'tgt_h5ad_t{t}'][ind]
-            else:
-                out[f'tgt_pca_t{t}'] = None
-
         return out
 
     def __len__(self):
@@ -140,9 +123,7 @@ class CellGenDataModule(LightningDataModule):
         time_steps: list = [1, 2],
         total_time_steps: int = 4,
         src_counts: Optional[np.ndarray] = None,
-        src_pca: Optional[np.ndarray] = None,
         tgt_counts_dict: Optional[np.ndarray] = None,
-        tgt_pca_dict: Optional[np.ndarray] = None,
         condition_keys: Optional[list] = None,
         condition_encodings: Optional[dict] = None,
         conditions: Optional[torch.Tensor] = None,
@@ -163,8 +144,6 @@ class CellGenDataModule(LightningDataModule):
         self.tgt_datasets = tgt_datasets
         self.src_counts = src_counts
         self.tgt_counts_dict = tgt_counts_dict
-        self.src_pca = src_pca
-        self.tgt_pca_dict = tgt_pca_dict
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.shuffle = shuffle
@@ -199,8 +178,6 @@ class CellGenDataModule(LightningDataModule):
                     split_indices=self.train_indices,
                     src_counts=self.src_counts,
                     tgt_counts_dict=self.tgt_counts_dict,
-                    src_pca=self.src_pca,
-                    tgt_pca_dict=self.tgt_pca_dict,
                     time_steps=self.time_steps,
                     conditions=self.conditions
                     if self.condition_keys is not None
@@ -216,8 +193,6 @@ class CellGenDataModule(LightningDataModule):
                         split_indices=self.val_indices,
                         src_counts=self.src_counts,
                         tgt_counts_dict=self.tgt_counts_dict,
-                        src_pca=self.src_pca,
-                        tgt_pca_dict=self.tgt_pca_dict,
                         time_steps=self.time_steps,
                         conditions=self.conditions
                         if self.condition_keys is not None
@@ -235,8 +210,6 @@ class CellGenDataModule(LightningDataModule):
                     split_indices=self.train_indices,
                     src_counts=self.src_counts,
                     tgt_counts_dict=self.tgt_counts_dict,
-                    src_pca=self.src_pca,
-                    tgt_pca_dict=self.tgt_pca_dict,
                     time_steps=self.time_steps,
                 )
                 if self.val_indices is not None:
@@ -246,8 +219,6 @@ class CellGenDataModule(LightningDataModule):
                         split_indices=self.val_indices,
                         src_counts=self.src_counts,
                         tgt_counts_dict=self.tgt_counts_dict,
-                        src_pca=self.src_pca,
-                        tgt_pca_dict=self.tgt_pca_dict,
                         time_steps=self.time_steps,
                     )
                 else:
@@ -262,8 +233,6 @@ class CellGenDataModule(LightningDataModule):
                     split_indices=self.test_indices,
                     src_counts=self.src_counts,
                     tgt_counts_dict=self.tgt_counts_dict,
-                    src_pca=self.src_pca,
-                    tgt_pca_dict=self.tgt_pca_dict,
                     time_steps=self.time_steps,
                     conditions=self.conditions
                     if self.condition_keys is not None
@@ -279,8 +248,6 @@ class CellGenDataModule(LightningDataModule):
                     split_indices=self.test_indices,
                     src_counts=self.src_counts,
                     tgt_counts_dict=self.tgt_counts_dict,
-                    src_pca=self.src_pca,
-                    tgt_pca_dict=self.tgt_pca_dict,
                     time_steps=self.time_steps,
                 )
 
@@ -337,9 +304,6 @@ class CellGenDataModule(LightningDataModule):
             else:
                 src_counts = [torch.tensor(d['src_counts']) for d in batch]
             src_counts = torch.cat(src_counts, dim=0)
-        if batch[0]['src_pca'] is not None:
-            src_pca = [torch.tensor(d['src_pca']) for d in batch]
-            src_pca = torch.stack(src_pca)
         if self.condition_encodings:
             condition = [d['conditions'] for d in batch]
             condition_combined = torch.stack([d['conditions_combined'] for d in batch])
@@ -350,7 +314,6 @@ class CellGenDataModule(LightningDataModule):
             'src_input_ids': src_input_batch_id,
             'src_length': src_length,
             'src_counts': src_counts,
-            'src_pca': src_pca,
             'batch': condition,
             'combined_batch': condition_combined,
         }
@@ -382,9 +345,6 @@ class CellGenDataModule(LightningDataModule):
                     ]
                 out[f'tgt_counts_t{time_step}'] = torch.cat(tgt_counts, dim=0)
                 out[f'tgt_size_factor_t{time_step}'] = torch.cat(tgt_size_factor, dim=0)
-            if batch[0][f'tgt_pca_t{time_step}'] is not None:
-                tgt_pca = [torch.tensor(d[f'tgt_pca_t{time_step}']) for d in batch]
-                out[f'tgt_pca_t{time_step}'] = torch.stack(tgt_pca)
             # create input ids
             dataset = f'tgt_dataset_t{time_step}'
             out[f'tgt_input_ids_t{time_step}'] = [
