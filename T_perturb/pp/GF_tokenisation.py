@@ -204,12 +204,7 @@ with open('./T_perturb/T_perturb/pp/res/eb/token_id_to_genename_all.pkl', 'wb') 
 # ) as f:
 #     pickle.dump(token_id_to_row_id_dict, f)
 
-# with open(
-#     f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-#     f'/token_id_to_genename_{args.gene_filtering_mode}.pkl',
-#     'wb',
-# ) as f:
-#     pickle.dump(row_id_to_gene_name, f)
+
 # make new directory to store h5ad files
 paired_h5ad_dir = (
     f'./T_perturb/T_perturb/pp/res/{args.dataset}'
@@ -261,6 +256,13 @@ adata = sc.read_h5ad(
     './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
     exclude_non_GF_genes=True,
 )
+# save row id to gene name mapping
+with open(
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}'
+    f'/token_id_to_genename_{args.gene_filtering_mode}.pkl',
+    'wb',
+) as file:
+    pickle.dump(row_id_to_gene_name, file)
 # create separate directory only for tokenisation
 output_tmp_dir = (
     f'./T_perturb/T_perturb/pp/res/{args.dataset}'

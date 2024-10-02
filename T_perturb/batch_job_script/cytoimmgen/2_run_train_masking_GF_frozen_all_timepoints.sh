@@ -4,11 +4,11 @@
 #BSUB -n 16 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
-#BSUB -o logs/cytoimmgen_masking_all%J.out # output file
-#BSUB -e logs/cytoimmgen_masking_all%J.err # error file
+#BSUB -o logs/cytoimmgen_masking_imputation_%J.out # output file
+#BSUB -e logs/cytoimmgen_masking_imputation_%J.err # error file
 #BSUB -M 50000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
-#BSUB -J cytoimmgen_masking_all_timepoints # job name
+#BSUB -J cytoimmgen_masking_imputation # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -23,7 +23,7 @@ echo "--- Start computing model"
 
 # # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
-RES_NAME="cytoimmgen/embedding_analysis"
+RES_NAME="cytoimmgen/imputation"
 # if directory does not exist, create it with the name $RES_NAME
 mkdir -p $RES_DIR/$RES_NAME
 # Get the current timestamp
@@ -48,11 +48,11 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --max_len 300 \
 --epochs 10 \
 --tgt_vocab_size 1254 \
---cellgen_lr 0.0001 \
---cellgen_wd 0.0001 \
+--cellgen_lr 0.00001 \
+--cellgen_wd 0.00001 \
 --mlm_prob 0.15 \
 --n_workers 16 \
---d_ff 128 \
+--d_ff 64 \
 --num_layers 6 \
 --condition_keys Cell_culture_batch \
 --time_steps 1 2 3 \

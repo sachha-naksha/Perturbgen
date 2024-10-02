@@ -177,6 +177,7 @@ def return_cos_similarity(
         len(marker_genes_ids.keys()),
         device=gene_embeddings.device,
     )
+
     marker_genes_dict = {}
     for i, gene in enumerate(marker_genes_ids.keys()):
         # extract cosine similarity for marker genes
@@ -378,7 +379,6 @@ def tokenid_mapping(
         zip(special_tokens_dict.values(), special_tokens_dict.values())
     )
     row_id = row_id[~np.isin(row_id, list(special_tokens_dict.values()))]
-    print(row_id)
     adata_subset.var['row_id'] = row_id
     # create dictionary to map token_id to row_id
     token_id_to_row_id_dict = dict(
@@ -673,8 +673,6 @@ def label_encoder(adata, encoder, condition_key=None):
 def randomised_split(adata: ad.AnnData, train_prop: float, test_prop: float, seed: int):
     n_cells = adata.shape[0]
     indices = np.arange(n_cells)
-    print(len(indices))
-
     # define train, val and test size
     train_size = np.round(train_prop * n_cells).astype(int)
     test_size = np.round(test_prop * n_cells).astype(int)

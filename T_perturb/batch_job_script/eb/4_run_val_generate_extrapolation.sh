@@ -1,14 +1,14 @@
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
 #BSUB -gpu 'mode=exclusive_process:num=1' # request for exclusive access to gpu
-#BSUB -n 32 # number of cores
+#BSUB -n 16 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
-#BSUB -o logs/eb_generate_extra_%J.out # output file
-#BSUB -e logs/eb_generate_extra_%J.err # error file
+#BSUB -o logs/eb_generate_extra_s100_%J.out # output file
+#BSUB -e logs/eb_generate_extra_s100_%J.err # error file
 #BSUB -M 50000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
-#BSUB -J eb_generate_extra # job name
+#BSUB -J eb_generate_extra_s100 # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -39,23 +39,26 @@ python3 $cwd/val.py \
 --split False \
 --splitting_mode random \
 --generate True \
---ckpt_count_path './T_perturb/T_perturb/iclr/eb/interpolation/res/checkpoints/20240926_1610_cellgen_train_masking_lr_0.001_wd_0.0001_batch_32_mlmp_0.15_tp_1-2-4_s_42-epoch=99.ckpt' \
 --output_dir $RES_DIR/$RES_NAME/res \
---src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_src_4096/Day 00-03.dataset' \
---tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_tgt_4096' \
---src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src_4096/Day 00-03.h5ad' \
---tgt_adata_folder './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_tgt_4096' \
---batch_size 32 \
+--ckpt_count_path './T_perturb/T_perturb/iclr/eb/extrapolation/res/checkpoints/20240930_2350_cellgen_train_count_lr_0.0001_wd_0.0001_batch_64_zinb_tp_1-2_s_100_pos_sin_learnt_m_cosine-epoch=99.ckpt' \
+--src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_src/Day 00-03.dataset' \
+--tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_tgt' \
+--src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src/Day 00-03.h5ad' \
+--tgt_adata_folder './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_tgt' \
+--batch_size 64 \
 --max_len 270 \
---tgt_vocab_size 2001 \
+--tgt_vocab_size 1730 \
 --cellgen_lr 0.001 \
 --cellgen_wd 0.0001 \
 --count_lr 0.0001 \
 --count_wd 0.0001 \
---num_layers 2 \
---d_ff 16 \
+--num_layers 3 \
+--d_ff 32 \
 --loss_mode zinb \
---n_workers 32 \
+--n_workers 16 \
 --time_steps 3 \
---var_list Time_point
+--var_list Time_point \
+--mode GF_frozen \
+--positional_encoding sin_learnt \
+--mask_scheduler 'cosine'
 echo '--- Finished computing model'

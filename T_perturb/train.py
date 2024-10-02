@@ -202,7 +202,7 @@ def get_args():
     parser.add_argument(
         '--test_prop',
         type=float,
-        default=0.1,
+        default=0.2,
     )
     parser.add_argument(
         '--mode',
@@ -254,6 +254,50 @@ def main() -> None:
     tgt_adatas = read_dataset_files(args.tgt_adata_folder, 'h5ad')
     src_dataset = load_from_disk(args.src_dataset)
     src_adata = sc.read_h5ad(args.src_adata)
+
+    # # filter for cell type of interest
+    # if (args.imputation_obs) and (args.imputation_category):
+    #     tp_cell_type = []
+    #     pairing_index_list = []
+    #     pattern = r'tgt_h5ad_t(\d+)'
+    #     for file_name, tgt_adata in tgt_adatas.items():
+    #         if args.guided_gene_list_dir:
+    #             tp_cell_type.extend(
+    #                 tgt_adatas[file_name].obs['Donor'].unique().tolist()
+    #             )
+    #         # add row index to filter src
+    #         tgt_adata.obs['index'] = range(len(tgt_adata))
+    #         # only select specific timepoints
+    #         imputation_mask = tgt_adata.obs[
+    #             args.imputation_obs
+    #             ] != args.imputation_category
+    #         if sum(imputation_mask) == 0:
+    #             pass
+    #         else:
+    #             imputation_idx = tgt_adata.obs['cell_pairing_index'][imputation_mask]
+    #             imputation_idx = imputation_idx.tolist()
+    #             pairing_index = tgt_adata[imputation_mask].obs['index'].tolist()
+
+    #             pairing_index_list.extend(pairing_index)
+    #             tgt_adatas[file_name].obs.drop('index', axis=1, inplace=True)
+
+    #     if len(pairing_index) > 0:
+    #         src_adata = src_adata[pairing_index]
+    #         src_dataset = src_dataset.select(pairing_index)
+    #         for file_name, tgt_adata in tgt_adatas.items():
+    #             re_file_name = re.search(pattern, file_name)
+    #             if re_file_name:
+    #                 time_step = int(re_file_name.group(1))
+    #                 tgt_datasets[f'tgt_dataset_t{time_step}'] = tgt_datasets[
+    #                     f'tgt_dataset_t{time_step}'
+    #                 ].select(pairing_index)
+    #                 tgt_adatas[file_name] = tgt_adata[pairing_index]
+    #     # print number of dropped samples
+    #     print(
+    #         f'Number of samples excluded for '
+    #         f'imputation: {len(src_adata) - len(pairing_index)}'
+    #     )
+    # raise
 
     # use the tmp adata for all operation
     # where the metadata and information is shared across timepoints
@@ -516,7 +560,7 @@ def main() -> None:
             f'p{args.positional_encoding}_m_{args.mask_scheduler}'
             f'_tp_{time_steps_str}_s_{args.seed}'
         )
-        if args.split:
+        if len(val_indices) > 0:
             monitor_metric = 'val/perplexity'
         else:
             monitor_metric = 'train/perplexity'
@@ -528,7 +572,7 @@ def main() -> None:
             f'{args.loss_mode}_tp_{time_steps_str}_s_'
             f'{args.seed}_pos_{args.positional_encoding}_m_{args.mask_scheduler}'
         )
-        if args.split:
+        if len(val_indices) > 0:
             monitor_metric = 'val/mse'
             mode = 'min'
         else:

@@ -124,9 +124,9 @@ class CellGenTrainer(LightningModule):
                 mapping_dict_path,
                 'rb',
             ) as f:
-                ensembl_to_token_id = pickle.load(f)
+                gene_to_tokenid = pickle.load(f)
         # change to token_id to gene name
-        self.token_id_to_ensembl = {v: k for k, v in ensembl_to_token_id.items()}
+        self.gene_to_tokenid = gene_to_tokenid
         self.return_embeddings = return_embeddings
         self.generate = generate
         self.tgt_vocab_size = tgt_vocab_size
@@ -307,63 +307,76 @@ class CellGenTrainer(LightningModule):
                 ) = compute_cos_similarity(
                     outputs=outputs, time_step=time_step, all_time_steps=self.time_steps
                 )
-
-                # define marker gene list to extract gene embeddings
+                # # define marker gene list to extract gene embeddings
+                # marker_genes = [
+                #     'IL7R',
+                #     'CD52',
+                #     'GIMAP7',
+                #     'SARAF',
+                #     'BTG1',
+                #     'LTB',
+                #     'CXCR4',
+                #     'STAT1',
+                #     'IRF1',
+                #     'IFIT3',
+                #     'GBP1',
+                #     'SYNE2',
+                #     'SOCS3',
+                #     'IL4R',
+                #     'CD69',
+                #     'MIR155HG',
+                #     'DDX21',
+                #     'TNFRSF4',
+                #     'HSP90AA1',
+                #     'HSP90AB1',
+                #     'HSPA8',
+                #     'TXN',
+                #     'FABP5',
+                #     'TUBA1B',
+                #     'HMGA1',
+                #     'PCNA',
+                #     'IL2RA',
+                #     'BATF',
+                #     'CD63',
+                #     'IFITM2',
+                #     'CORO1B',
+                #     'ISG15',
+                #     'ALDOC',
+                #     'DDIT4',
+                #     'LGALS1',
+                #     'S100A4',
+                #     'S100A6',
+                #     'VIM',
+                #     'CD74',
+                #     'HLA-DRA',
+                #     'HLA-DRB1',
+                # ]
                 marker_genes = [
-                    'IL7R',
-                    'CD52',
-                    'GIMAP7',
-                    'SARAF',
-                    'BTG1',
-                    'LTB',
-                    'CXCR4',
-                    'STAT1',
-                    'IRF1',
-                    'IFIT3',
-                    'GBP1',
-                    'SYNE2',
-                    'SOCS3',
-                    'IL4R',
-                    'CD69',
-                    'MIR155HG',
-                    'DDX21',
-                    'TNFRSF4',
-                    'HSP90AA1',
-                    'HSP90AB1',
-                    'HSPA8',
-                    'TXN',
-                    'FABP5',
-                    'TUBA1B',
-                    'HMGA1',
-                    'PCNA',
-                    'IL2RA',
-                    'BATF',
-                    'CD63',
-                    'IFITM2',
-                    'CORO1B',
-                    'ISG15',
-                    'ALDOC',
-                    'DDIT4',
-                    'LGALS1',
-                    'S100A4',
-                    'S100A6',
-                    'VIM',
-                    'CD74',
-                    'HLA-DRA',
-                    'HLA-DRB1',
+                    'CHMP7',
+                    'MDM4',
+                    'TNRC6B',
+                    'GPA33',
+                    'RBM6',
+                    'FCGR3A',
+                    'SGK1',
+                    'CLC',
+                    'FOS',
+                    'ARC',
+                    'AKAP13',
+                    'TNIP3',
+                    'IL6',
                 ]
-
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
                     marker_genes=marker_genes,
                     cos_similarity=cos_similarity,
                     gene_embeddings=gene_embeddings,
-                    mapping_dict=self.token_id_to_ensembl,
+                    mapping_dict=self.gene_to_tokenid,
                     token_ids=token_ids,
                 )
                 marker_gene_embeddings = return_gene_embeddings(
                     marker_genes=marker_genes,
                     gene_embeddings=gene_embeddings,
-                    mapping_dict=self.token_id_to_ensembl,
+                    mapping_dict=self.gene_to_tokenid,
                     token_ids=token_ids,
                 )
                 self.marker_genes = marker_genes_dict
@@ -571,6 +584,7 @@ class CountDecoderTrainer(LightningModule):
             'ctrl_counts': [],
             'pred_counts': [],
             'cls_embeddings': [],
+            'cell_idx': [],
         }
         if self.return_rouge_score:
             self.seq_len_list = [25, 100, max_seq_length]
@@ -902,6 +916,8 @@ class CountDecoderTrainer(LightningModule):
                     pred_ids[np.isin(pred_ids, special_tokens)] = ''
                     tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
 
+                    # TODO: rewrite the function without mapping dict
+                    # only use the string of tokens
                     def map_token_to_ensembl(val):
                         return self.token_id_to_ensembl.get(
                             val, val
@@ -969,14 +985,15 @@ class CountDecoderTrainer(LightningModule):
             mse_all = []
             for time_step in self.time_steps:
                 pred_count = pred_counts_dict[time_step]
-
                 true_count = batch[f'tgt_counts_t{time_step}']
+                cell_ids = batch[f'tgt_cell_idx_t{time_step}']
                 # MSE
                 mse = self.mse(pred_count, true_count)
                 mse_all.append(mse)
                 # gather for validation step
                 self.test_dict['pred_counts'].append(pred_count)
                 self.test_dict['true_counts'].append(true_count)
+                self.test_dict['cell_idx'].append(cell_ids)
                 if len(self.var_list) > 0:
                     for var in self.var_list:
                         self.test_dict[var].append(batch[f'{var}_t{time_step}'])
@@ -1021,6 +1038,7 @@ class CountDecoderTrainer(LightningModule):
         # TODO: clean up no if and else needed
         true_counts = torch.cat(self.test_dict['true_counts']).detach().cpu()
         pred_counts = torch.cat(self.test_dict['pred_counts']).detach().cpu()
+        cell_ids = np.concatenate(self.test_dict['cell_idx'])
         if self.generate:
             print('---Generating anndata')
 
@@ -1032,6 +1050,7 @@ class CountDecoderTrainer(LightningModule):
                 test_obs = pd.DataFrame(var_dict)
             else:
                 test_obs = None
+            test_obs['cell_idx'] = cell_ids
             cls_embeddings = torch.cat(self.test_dict['cls_embeddings']).detach().cpu()
             pred_adata = ad.AnnData(X=pred_counts.numpy(), obs=test_obs)
             pred_adata.layers['counts'] = true_counts.numpy()
@@ -1108,7 +1127,7 @@ class CountDecoderTrainer(LightningModule):
             metrics.to_csv(
                 f'{self.output_dir}/{self.date}_p{self.positional_encoding}_'
                 f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
-                '_s{self.sequence_length}_metrics.csv'
+                f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
             )
 
         else:

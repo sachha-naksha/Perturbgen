@@ -34,7 +34,7 @@ parameters:
   mask_scheduler:
     value: 'cosine'
   batch_size:
-    values: [32,64]
+    values: [64]
   cellgen_lr:
     values: [0.001, 0.0001, 0.00001]
   num_layers:

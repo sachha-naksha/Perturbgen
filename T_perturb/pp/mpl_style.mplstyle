@@ -1,6 +1,6 @@
 #figure resolution
 figure.dpi : 100
-savefig.dpi : 300
+savefig.dpi : 100
 
 #axes
 axes.spines.top : False

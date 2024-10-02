@@ -58,7 +58,14 @@ from T_perturb.src.utils import (
 
 
 class SepSinPositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, length: int):
+    def __init__(
+        self,
+        d_model: int,
+        length: int,
+        mode: Literal[
+            'GF_frozen', 'GF_fine_tuned', 'Transformer_encoder'
+        ] = 'GF_frozen',
+    ):
         '''
         Description:
         ------------
@@ -84,23 +91,32 @@ class SepSinPositionalEncoding(nn.Module):
         # train time steps and interpolation timestep
         # TODO: Need to be changed if running the Encoder model
         super(SepSinPositionalEncoding, self).__init__()
-
-        pe = torch.zeros(length, d_model)
-        position = torch.arange(0, length, dtype=torch.float).unsqueeze(1)
+        if mode in ['GF_frozen', 'GF_fine_tuned']:
+            total_seq_length = length
+        elif mode == 'Transformer_encoder':
+            # add one time step to included src time step
+            total_seq_length = length + 1
+        pe = torch.zeros(total_seq_length, d_model)
+        position = torch.arange(0, total_seq_length, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(
             torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
         )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe.unsqueeze(0))
+        self.mode = mode
 
     def forward(self, x, tgt_time_step=None):
-        if tgt_time_step:
-            pe = self.pe[:, tgt_time_step - 1]  # -1 to start from 0
+        if tgt_time_step is not None:
+            if self.mode in ['GF_frozen', 'GF_fine_tuned']:
+                tgt_time_step_ = tgt_time_step - 1
+            elif self.mode == 'Transformer_encoder':
+                # start from 0 to include src time step
+                tgt_time_step_ = tgt_time_step
+            pe = self.pe[:, tgt_time_step_]  # -1 to start from 0
             pe = pe.unsqueeze(0).expand(x.size(0), x.size(1), -1)
         else:
             pe = self.pe[:, : x.size(1)]
-
         return x + pe
 
 
@@ -486,28 +502,47 @@ class Encoder(nn.Module):
         d_ff: int = 512,
         position_embedding: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
-        ] = 'time_pos_sin',
+        ] = 'sin_learnt',
     ):
         super().__init__()
         self.position_embedding = position_embedding
-        self.positional_encoding = CombSinPositionalEncoding(
-            d_model=d_model,
-            max_seq_length=max_seq_length,
-            n_time_steps=n_time_steps,
-            mode='Transformer_encoder',
-        )
-
+        if self.position_embedding == 'time_pos_sin':
+            self.time_sin_pos_encoding = SepSinPositionalEncoding(
+                d_model=d_model,
+                length=n_time_steps,
+                mode='Transformer_encoder',
+            )
+            self.pos_sin_pos_encoding = SepSinPositionalEncoding(
+                d_model=d_model,
+                length=max_seq_length,
+            )
+        elif self.position_embedding == 'sin_learnt':
+            self.time_sin_pos_encoding = SepSinPositionalEncoding(
+                d_model=d_model, length=n_time_steps, mode='Transformer_encoder'
+            )
+            self.learnt_pos_encoding = LearntPositionalEncoding(
+                d_model=d_model,
+                max_seq_length=max_seq_length,
+            )
+        elif self.position_embedding == 'comb_sin':
+            self.comb_pos_encoding = CombSinPositionalEncoding(
+                d_model=d_model,
+                max_seq_length=max_seq_length,
+                n_time_steps=n_time_steps,
+                mode='Transformer_encoder',
+            )
         encoder_layers = TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=d_ff,
+            activation='gelu',
             dropout=dropout,
-            # batch_first=True,
+            batch_first=True,
         )
         self.transformer_encoder = TransformerEncoder(
             encoder_layers,
             num_layers=nlayers,
-            # norm=nn.LayerNorm(d_model),
+            norm=nn.LayerNorm(d_model),
         )
         self.token_embedding = nn.Embedding(total_vocab_size, d_model, padding_idx=0)
         nn.init.xavier_uniform_(self.token_embedding.weight)
@@ -533,34 +568,42 @@ class Encoder(nn.Module):
         output: `torch.Tensor`
             shape ``[batch_size, seq_len, total_vocab_size]``
         '''
-        # batch_size, sequence_length = src.size()
-        # # Sample sequences for each element in the batch
-        # tokens = torch.arange(self.total_vocab_size)
-        # # Preallocate a tensor to hold all sampled sequences
-        # src = torch.empty(
-        #     (batch_size, sequence_length), dtype=torch.long, device=src.device
-        # )
-        # for i in range(batch_size):
-        #     # Sampling without replacement for each sequence
-        #     sampled_indices = torch.multinomial(
-        #         torch.ones(self.total_vocab_size), sequence_length, replacement=False
-        #     )
-        #     src[i] = tokens[sampled_indices]
+        batch_size, sequence_length = src.size()
+        # Sample sequences for each element in the batch
+        tokens = torch.arange(self.total_vocab_size)
+        # Preallocate a tensor to hold all sampled sequences
+        src = torch.empty(
+            (batch_size, sequence_length), dtype=torch.long, device=src.device
+        )
+        for i in range(batch_size):
+            # Sampling without replacement for each sequence
+            sampled_indices = torch.multinomial(
+                torch.ones(self.total_vocab_size), sequence_length, replacement=False
+            )
+            src[i] = tokens[sampled_indices]
         # transpose src:
         # [batch_size, seq_len, d_model] -> [seq_len, batch_size, d_model]
-
         src_embedding = self.token_embedding(src) * math.sqrt(self.d_model)
-        src_embedding = self.rank_positional_encoding(src_embedding)
-        src_embedding = self.time_positional_encoding(src_embedding, tgt_time_step=None)
+        if self.position_embedding == 'time_pos_sin':
+            dec_embedding = self.time_sin_pos_encoding(src_embedding, 0)
+            dec_embedding = self.pos_sin_pos_encoding(dec_embedding)
+        elif self.position_embedding == 'sin_learnt':
+            dec_embedding = self.time_sin_pos_encoding(src_embedding, 0)
+            dec_embedding = self.learnt_pos_encoding(dec_embedding)
+        elif self.position_embedding == 'comb_sin':
+            dec_embedding = self.comb_pos_encoding(
+                src_embedding,
+                tgt_time_step=0,
+            )
         output = self.transformer_encoder(src_embedding, src_key_padding_mask=src_mask)
-        # reverse transpose
-        output = output.transpose(0, 1)
-        return output
-        # output = self.transformer_encoder(
-        #     src_embedding,
-        #     src_key_padding_mask=src_mask,
-        # )
+        # # reverse transpose
+        # output = output.transpose(0, 1)
         # return output
+        output = self.transformer_encoder(
+            src_embedding,
+            src_key_padding_mask=src_mask,
+        )
+        return output
 
 
 class CellGen(nn.Module):
@@ -612,7 +655,7 @@ class CellGen(nn.Module):
         time_steps: `list`
             List of time steps for training and testing.
         total_time_steps: `int`
-            Total number of time steps.
+            Total number of target time steps.
         mode: `str`
             Mode of the encoder.
             Options: ['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
@@ -650,6 +693,7 @@ class CellGen(nn.Module):
             self.time_sin_pos_encoding = SepSinPositionalEncoding(
                 d_model=d_model,
                 length=total_time_steps,
+                mode=mode,
             )
             self.learnt_pos_encoding = LearntPositionalEncoding(
                 d_model=d_model,
@@ -981,6 +1025,7 @@ class CellGen(nn.Module):
                         tgt_input_id_dict=tgt_input_id_dict,
                         tgt_pad_dict=tgt_pad_dict,
                     )
+
                 tgt_embedding = self.token_embedding(tgt_input_id)
 
                 if self.position_embedding == 'time_pos_sin':

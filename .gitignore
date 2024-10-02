@@ -140,3 +140,4 @@ checkpoints
 Geneformer/
 .torch25/
 *.h5ad
+final_results/
