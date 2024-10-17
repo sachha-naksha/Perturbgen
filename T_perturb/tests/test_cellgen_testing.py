@@ -31,7 +31,10 @@ class CellGenTestGenerationCase(unittest.TestCase):
         self.num_samples = 100
 
     def setUp(self):
+        # Reproducibility
         pl.seed_everything(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
         # set conditions and conditions_combined to None if no batch effect
         conditions = None
@@ -142,11 +145,13 @@ class CellGenTestGenerationCase(unittest.TestCase):
             # lr_scheduler_factor=0.8,
             conditions=conditions_,
             conditions_combined=conditions_combined_,
+            n_genes=self.num_genes,
             dropout=0.0,
             time_steps=self.time_step,
             total_time_steps=2,
             temperature=1.5,
             iterations=19,
+            precision='high',
             mask_scheduler='pow',
             output_dir='./T_perturb/T_perturb/tests/res',
             mode='Transformer_encoder',

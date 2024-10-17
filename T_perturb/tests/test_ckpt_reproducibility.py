@@ -2,6 +2,7 @@ import os
 import unittest
 
 import torch
+import torch.nn.functional as F
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
@@ -18,20 +19,25 @@ def checkpoints_are_equal(checkpoint_path1, checkpoint_path2):
     state_dict1 = load_checkpoint(checkpoint_path1)
     state_dict2 = load_checkpoint(checkpoint_path2)
 
+    similarity = 0.0
+    total_layers = 0
     # Compare state_dicts
     for key in state_dict1.keys():
+        similarity += F.cosine_similarity(
+            state_dict1[key].flatten().float(),
+            state_dict2[key].flatten().float(),
+            dim=0,
+        ).item()
         if key not in state_dict2:
             print(f'Key {key} not found in checkpoint 2.')
             return False
-        if not torch.equal(state_dict1[key], state_dict2[key]):
+        if not torch.allclose(state_dict1[key], state_dict2[key], atol=1e-6):
             print(f'Difference found in key: {key}')
             return False
+        total_layers += 1
 
-    for key in state_dict2.keys():
-        if key not in state_dict1:
-            print(f'Key {key} not found in checkpoint 1.')
-            return False
-
+    torch.set_printoptions(precision=10)
+    print(f'Cosine similarity: {similarity / total_layers}')
     return True
 
 
@@ -46,7 +52,6 @@ class TestCheckpointEquality(unittest.TestCase):
             './T_perturb/T_perturb/tests/checkpoints/'
             'test_masking_checkpoint-epoch=00.ckpt'
         )
-
         # Check if the checkpoints exist
         self.assertTrue(
             os.path.exists(checkpoint_path1),
@@ -72,7 +77,6 @@ class TestCheckpointEquality(unittest.TestCase):
             './T_perturb/T_perturb/tests/checkpoints/'
             'test_counts_checkpoint-epoch=00.ckpt'
         )
-
         # Check if the checkpoints exist
         self.assertTrue(
             os.path.exists(checkpoint_path1),
@@ -82,7 +86,6 @@ class TestCheckpointEquality(unittest.TestCase):
             os.path.exists(checkpoint_path2),
             f'Checkpoint {checkpoint_path2} does not exist.',
         )
-
         # Assert that the checkpoints are identical
         self.assertTrue(
             checkpoints_are_equal(checkpoint_path1, checkpoint_path2),

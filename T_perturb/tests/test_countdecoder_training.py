@@ -54,7 +54,10 @@ class CellGenTestTrainingCase(unittest.TestCase):
         self.num_samples = 100
 
     def setUp(self):
+        # Reproducibility
         pl.seed_everything(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
         # set conditions and conditions_combined to None if no batch effect
         conditions = None
@@ -161,6 +164,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
             loss_mode='zinb',
             lr=1e-3,
             weight_decay=0.0,
+            n_genes=self.num_genes,
             # lr_scheduler_patience=5.0,
             # lr_scheduler_factor=0.8,
             conditions=conditions_,
@@ -170,8 +174,9 @@ class CellGenTestTrainingCase(unittest.TestCase):
             total_time_steps=2,
             temperature=1.5,
             iterations=19,
+            precision='high',
             mask_scheduler='pow',
-            output_dir='./T_perturb/T_perturb/plt/res/cytoimmgen',
+            output_dir='./T_perturb/T_perturb/plt/res/',
             mode='Transformer_encoder',
             seed=42,
         )

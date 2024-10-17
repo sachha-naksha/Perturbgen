@@ -19,7 +19,7 @@ source /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/.cellgen_40
 cwd=$(pwd)
 
 # ----------------- Create folder to save results and copy the script -----------------
-RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
+RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/plt/res"
 RES_NAME="eb/extrapolation"
 # if directory does not exist, create it with the name $RES_NAME
 mkdir -p $RES_DIR/$RES_NAME
@@ -55,7 +55,7 @@ python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/
 --n_workers 16 \
 --num_layers 3 \
 --d_ff 32 \
---time_steps 1 \
+--time_steps 1 2 \
 --var_list Time_point \
 --mode GF_frozen \
 --positional_encoding sin_learnt \

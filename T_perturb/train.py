@@ -584,7 +584,7 @@ def main() -> None:
         dirpath=checkpoint_path,
         filename=f'{filename}-' + '{epoch:02d}',
         save_top_k=-1,
-        every_n_epochs=1,
+        every_n_epochs=10,
         verbose=True,
         monitor=monitor_metric,
         mode=mode,

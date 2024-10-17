@@ -126,7 +126,7 @@ class CellGenTestEmbeddingCase(unittest.TestCase):
             num_layers=1,
             d_ff=8,
             max_seq_length=self.max_seq_length + 10,
-            lr=1e-3,
+            end_lr=1e-3,
             weight_decay=0.0,
             # lr_scheduler_patience=5.0,
             # lr_scheduler_factor=0.8,

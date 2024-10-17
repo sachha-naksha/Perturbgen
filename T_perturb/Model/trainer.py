@@ -33,8 +33,7 @@ from T_perturb.src.metric import (
     evaluate_mmd,
     lin_reg_summary,
 )
-from T_perturb.src.utils import (
-    WarmupScheduler,
+from T_perturb.src.utils import (  # WarmupScheduler,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
@@ -45,14 +44,14 @@ from T_perturb.src.utils import (
 # from deepspeed.ops.adam import FusedAdam
 
 
-def set_matmul_precision_for_device():
+def set_matmul_precision_for_device(precision: Literal['high', 'medium'] = 'high'):
     if torch.cuda.is_available():
         cuda_device_name = torch.cuda.get_device_name()
     # If the device is an A100, set the precision for matrix multiplication
     if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
         print(f'Using {cuda_device_name} for training')
-        print('Set float32_matmul_precision to medium')
-        torch.set_float32_matmul_precision('medium')
+        print(f'Set float32_matmul_precision to {precision}')
+        torch.set_float32_matmul_precision(precision)
 
 
 class CellGenTrainer(LightningModule):
@@ -83,6 +82,7 @@ class CellGenTrainer(LightningModule):
         positional_encoding: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
+        precision: Literal['high', 'medium'] = 'medium',
         var_list: Optional[List[str]] = None,
         gene_names: Optional[List[str]] = None,
         mapping_dict_path: Optional[str] = None,
@@ -91,7 +91,7 @@ class CellGenTrainer(LightningModule):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
-        set_matmul_precision_for_device()
+        set_matmul_precision_for_device(precision)
         self.transformer = CellGen(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -193,15 +193,15 @@ class CellGenTrainer(LightningModule):
     def configure_optimizers(self):
         parameters = [{'params': self.transformer.parameters(), 'lr': self.end_lr}]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
-        number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
+        # number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
         # total_steps = self.num_epochs * number_of_batches_per_epoch
-        warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
-        scheduler = WarmupScheduler(
-            optimizer,
-            warmup_steps=warmup_steps,
-            initial_lr=self.initial_lr,
-            end_lr=self.end_lr,
-        )
+        # warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
+        # scheduler = WarmupScheduler(
+        #     optimizer,
+        #     warmup_steps=warmup_steps,
+        #     initial_lr=self.initial_lr,
+        #     end_lr=self.end_lr,
+        # )
         # optimizer = FusedAdam(
         #     self.transformer.parameters(), lr=self.lr, weight_decay=self.weight_decay
         # )
@@ -217,8 +217,8 @@ class CellGenTrainer(LightningModule):
             # 'lr_scheduler': lr_scheduler,
             # 'scheduler_type': 'WarmupCosineLR',
             'monitor': 'train/masking_loss',
-            'interval': 'step',
-            'lr_scheduler': scheduler,
+            # 'interval': 'step',
+            # 'lr_scheduler': scheduler,
         }
 
     def training_step(self, batch, *args, **kwargs):
@@ -462,6 +462,7 @@ class CountDecoderTrainer(LightningModule):
         temperature: float = 2.0,
         iterations: int = 18,
         n_samples: int = 1,
+        precision: Literal['high', 'medium'] = 'medium',
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
         mode: str = 'GF_fine_tuned',
         mapping_dict_path: str = (
@@ -488,7 +489,7 @@ class CountDecoderTrainer(LightningModule):
     ):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
-        set_matmul_precision_for_device()
+        set_matmul_precision_for_device(precision)
         if mapping_dict_path is not None:
             with open(
                 mapping_dict_path,
@@ -532,7 +533,6 @@ class CountDecoderTrainer(LightningModule):
             context_mode=context_mode,
             n_genes=n_genes,
         )
-
         if ckpt_count_path is not None:
             checkpoint = torch.load(ckpt_count_path, map_location='cpu')
 
@@ -1049,7 +1049,7 @@ class CountDecoderTrainer(LightningModule):
                     var_dict[var] = np.concatenate(self.test_dict[var])
                 test_obs = pd.DataFrame(var_dict)
             else:
-                test_obs = None
+                test_obs = pd.DataFrame()
             test_obs['cell_idx'] = cell_ids
             cls_embeddings = torch.cat(self.test_dict['cls_embeddings']).detach().cpu()
             pred_adata = ad.AnnData(X=pred_counts.numpy(), obs=test_obs)

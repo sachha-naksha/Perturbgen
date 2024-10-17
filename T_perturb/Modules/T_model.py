@@ -70,14 +70,18 @@ class SepSinPositionalEncoding(nn.Module):
         Description:
         ------------
         Positional encoding for the transformer model.
-        Can be applied to distinguish between ranks and time steps.
+        This will create separate positional encodings
+        for the time steps and the ranks.
 
         Parameters:
         -----------
         d_model: `int`
             Token embedding dimension.
         length: `int`
-            Two options:
+            Length of the positional encoding.
+        mode: Literal['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
+            Mode of the transformer encoder.
+        Two options:
             - encoding positional information of the gene ranking:
                 length = total_vocab_size
             - encoding positional information of the time steps:
@@ -86,7 +90,8 @@ class SepSinPositionalEncoding(nn.Module):
         Returns:
         --------
         x: `torch.Tensor`
-            Positional embeddings.
+            Token embeddings with positional encoding.
+            Shape ``[batch_size, seq_len, d_model]``
         '''
         # train time steps and interpolation timestep
         # TODO: Need to be changed if running the Encoder model
@@ -121,7 +126,13 @@ class SepSinPositionalEncoding(nn.Module):
 
 
 class CombSinPositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_seq_length, n_time_steps, mode='GF_fine_tuned'):
+    def __init__(
+        self,
+        d_model,
+        max_seq_length,
+        n_time_steps,
+        mode=Literal['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder'],
+    ):
         '''
         Description:
         ------------
@@ -143,7 +154,7 @@ class CombSinPositionalEncoding(nn.Module):
         Returns:
         --------
         x: `torch.Tensor`
-            Positional embeddings.
+            Token embeddings with positional encoding.
         '''
         # train time steps and interpolation timestep
         # TODO: separate timestep positional encoding
@@ -181,6 +192,25 @@ class CombSinPositionalEncoding(nn.Module):
 
 
 class LearntPositionalEncoding(nn.Module):
+    '''
+    Description:
+    ------------
+    Learnt positional encoding for the transformer model.
+
+    Parameters:
+    -----------
+    d_model: `int`
+        Token embedding dimension.
+    max_seq_length: `int`
+        Maximum sequence length.
+
+    Returns:
+    --------
+    x: `torch.Tensor`
+        Token embeddings with positional encoding.
+        Shape ``[batch_size, seq_len, d_model]``
+    '''
+
     def __init__(self, d_model, max_seq_length):
         super(LearntPositionalEncoding, self).__init__()
         self.position_embeddings = nn.Embedding(max_seq_length, d_model)
@@ -308,9 +338,7 @@ class CrossAttention(nn.Module):
         context=None,
         mask=None,
         attention_mode='sdpa',
-        precision=torch.bfloat16,
     ):
-        # x = x.to(precision)
         h = self.num_heads
         q = self.to_q(x)
         if context is None:
@@ -389,14 +417,10 @@ class Block(nn.Module):
         )  # add hidden size
         self.dropout = nn.Dropout(dropout)
 
-    def forward(
-        self, x, src_mask=None, tgt_mask=None, enc_output=None, precision=torch.bfloat16
-    ):
-        attn_output = self.self_attn(x, mask=tgt_mask, precision=precision)
+    def forward(self, x, src_mask=None, tgt_mask=None, enc_output=None):
+        attn_output = self.self_attn(x, mask=tgt_mask)
         x = self.norm1(x + self.dropout(attn_output))
-        attn_output = self.cross_attn(
-            x, context=enc_output, mask=src_mask, precision=precision
-        )
+        attn_output = self.cross_attn(x, context=enc_output, mask=src_mask)
         x = self.norm2(x + self.dropout(attn_output))  # disabled residual connection
         ff_output = self.feed_forward(x)
         x = self.norm3(x + self.dropout(ff_output))
@@ -674,10 +698,12 @@ class CellGen(nn.Module):
         super(CellGen, self).__init__()
         if torch.cuda.is_available():
             cuda_device_name = torch.cuda.get_device_name()
-        if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
-            self.precision = torch.bfloat16
-        else:
-            self.precision = torch.float32
+            if ('A100' in cuda_device_name) or (
+                'NVIDIA H100 80GB HBM' in cuda_device_name
+            ):
+                self.precision = torch.bfloat16
+            else:
+                self.precision = torch.float32
         self.position_embedding = position_embedding
 
         if self.position_embedding == 'time_pos_sin':

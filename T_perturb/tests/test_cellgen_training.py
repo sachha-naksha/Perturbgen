@@ -32,8 +32,13 @@ def dummy_dataset(
         )
         input_ids = torch.tensor(input_ids_np, dtype=torch.long)
         input_ids[:, -10:] = 0
+        cell_idx = np.arange(num_samples)
         dataset = Dataset.from_dict(
-            {'input_ids': input_ids, 'length': [len(input_ids)] * num_samples}
+            {
+                'input_ids': input_ids,
+                'length': [len(input_ids)] * num_samples,
+                'cell_pairin_index': cell_idx,
+            }
         )
         return dataset
     else:
@@ -70,7 +75,10 @@ class CellGenTestTrainingCase(unittest.TestCase):
         self.d_model = 12
 
     def setUp(self):
+        # Reproducibility
         pl.seed_everything(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
         # Load transformer model and count decoder
         transformer = CellGenTrainer(
@@ -83,10 +91,15 @@ class CellGenTestTrainingCase(unittest.TestCase):
             dropout=0,
             mlm_probability=0.15,
             weight_decay=0.0,
-            lr=1e-3,
+            end_lr=1e-3,
+            precision='high',
             time_steps=self.time_step,
             total_time_steps=self.total_time_steps,
             mode='Transformer_encoder',
+            mapping_dict_path=(
+                './T_perturb/T_perturb/pp/res/'
+                'cytoimmgen/token_id_to_genename_hvg.pkl'
+            ),
         )
         self.transformer = transformer
 

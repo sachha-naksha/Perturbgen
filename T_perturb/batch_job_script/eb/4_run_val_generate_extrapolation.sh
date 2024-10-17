@@ -21,8 +21,8 @@ export WANDB_DIR=$cwd/wandb
 # run script
 echo '--- Start computing model'
 
-RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
-RES_NAME="eb/continuous_generation/"
+RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/plt/res"
+RES_NAME="eb/extrapolation/"
 
 # # if directory does not exist, create it with the name $RES_NAME
 # mkdir -p $RES_DIR/$RES_NAME
@@ -40,7 +40,7 @@ python3 $cwd/val.py \
 --splitting_mode random \
 --generate True \
 --output_dir $RES_DIR/$RES_NAME/res \
---ckpt_count_path './T_perturb/T_perturb/iclr/eb/extrapolation/res/checkpoints/20240930_2350_cellgen_train_count_lr_0.0001_wd_0.0001_batch_64_zinb_tp_1-2_s_100_pos_sin_learnt_m_cosine-epoch=99.ckpt' \
+--ckpt_count_path './T_perturb/T_perturb/plt/res/eb/extrapolation/res/checkpoints/20241017_1339_cellgen_train_count_lr_0.0001_wd_0.0001_batch_64_zinb_tp_1-2_s_42_pos_sin_learnt_m_cosine-epoch=99.ckpt' \
 --src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_src/Day 00-03.dataset' \
 --tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_tgt' \
 --src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src/Day 00-03.h5ad' \
