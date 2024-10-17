@@ -592,21 +592,6 @@ class Encoder(nn.Module):
         output: `torch.Tensor`
             shape ``[batch_size, seq_len, total_vocab_size]``
         '''
-        batch_size, sequence_length = src.size()
-        # Sample sequences for each element in the batch
-        tokens = torch.arange(self.total_vocab_size)
-        # Preallocate a tensor to hold all sampled sequences
-        src = torch.empty(
-            (batch_size, sequence_length), dtype=torch.long, device=src.device
-        )
-        for i in range(batch_size):
-            # Sampling without replacement for each sequence
-            sampled_indices = torch.multinomial(
-                torch.ones(self.total_vocab_size), sequence_length, replacement=False
-            )
-            src[i] = tokens[sampled_indices]
-        # transpose src:
-        # [batch_size, seq_len, d_model] -> [seq_len, batch_size, d_model]
         src_embedding = self.token_embedding(src) * math.sqrt(self.d_model)
         if self.position_embedding == 'time_pos_sin':
             dec_embedding = self.time_sin_pos_encoding(src_embedding, 0)
@@ -619,10 +604,6 @@ class Encoder(nn.Module):
                 src_embedding,
                 tgt_time_step=0,
             )
-        output = self.transformer_encoder(src_embedding, src_key_padding_mask=src_mask)
-        # # reverse transpose
-        # output = output.transpose(0, 1)
-        # return output
         output = self.transformer_encoder(
             src_embedding,
             src_key_padding_mask=src_mask,
@@ -678,13 +659,16 @@ class CellGen(nn.Module):
             Fraction of tokens to mask.
         time_steps: `list`
             List of time steps for training and testing.
+        mask_scheduler: `str`
+            Masking scheduler defining
+            the proportion of tokens to mask.
         total_time_steps: `int`
             Total number of target time steps.
         mode: `str`
             Mode of the encoder.
             Options: ['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
-        position_embedding: `str` (default: 'learnt')
-            Positional encoding type: ['sinusoidal', 'learnt'].
+        position_embedding: Literal['time_pos_sin', 'comb_sin', 'sin_learnt']
+            Positional encoding type.
         Returns:
         --------
         outputs: `dict`
@@ -696,14 +680,6 @@ class CellGen(nn.Module):
             - 'mean_embedding': Mean embeddings for non-padding tokens.
         '''
         super(CellGen, self).__init__()
-        if torch.cuda.is_available():
-            cuda_device_name = torch.cuda.get_device_name()
-            if ('A100' in cuda_device_name) or (
-                'NVIDIA H100 80GB HBM' in cuda_device_name
-            ):
-                self.precision = torch.bfloat16
-            else:
-                self.precision = torch.float32
         self.position_embedding = position_embedding
 
         if self.position_embedding == 'time_pos_sin':
@@ -776,15 +752,9 @@ class CellGen(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.decoder_fc = nn.Linear(d_model, tgt_vocab_size)  # Specify the GPU device)
+        self.decoder_fc = nn.Linear(d_model, tgt_vocab_size)
         self.dropout = nn.Dropout(dropout)
         self.mask_scheduler = mask_scheduler
-
-    #     self.init_weights()
-
-    # def init_weights(self) -> None:
-    #     initrange = 0.1
-    #     self.token_embedding.weight.data.uniform_(-initrange, initrange)
 
     def generate_mask(
         self,
@@ -797,11 +767,8 @@ class CellGen(nn.Module):
         '''
         Description:
         ------------
-        Masked language modeling for the target tokens.
-        Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
-        Modified from Huggingface Transformers library:
-        https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L840 # noqa
-        Accessed: 2024-05-12
+        Prepare masked tokens for the target input.
+
         Parameters:
         -----------
         tgt_input_id: `torch.Tensor`
@@ -812,6 +779,12 @@ class CellGen(nn.Module):
             Fraction of tokens to mask.
         mask_mode: `str`
             Masking mode: ['BERT', 'MASKGIT']
+            BERT: 80% MASK, 10% random, 10% original.
+            MASKGIT: mask tokens based on the mask scheduler.
+        mask_scheduler: `str`
+            Masking scheduler defining
+            the proportion of tokens to mask for MASKGIT.
+
         Returns:
         --------
         tgt_input_id: `torch.Tensor`
@@ -822,6 +795,12 @@ class CellGen(nn.Module):
         device = tgt_input_id.device
         labels = tgt_input_id.clone()
         if mask_mode == 'BERT':
+            # Masked language modeling for the target tokens.
+            # Prepare masked tokens inputs/labels for masked language modeling:
+            # 80% MASK, 10% random, 10% original.
+            # Modified from Huggingface Transformers library:
+            # https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L840 # noqa
+            # Accessed: 2024-05-12
             probability_matrix = torch.full_like(
                 tgt_pad, mlm_probability, dtype=torch.float
             )
@@ -863,7 +842,7 @@ class CellGen(nn.Module):
                 (torch.mul(sample_length, rand_mask_probs)).round().clamp(min=1)
             )
             rand_int = torch.rand((batch, seq_len - 1), device=device)
-
+            # exclude CLS token and set pad token to 1 to exclude from masking
             rand_int[tgt_pad[:, 1:]] = 1
             batch_randperm = rand_int.argsort(dim=-1)
             mask = batch_randperm < rearrange(num_token_masked, 'b -> b 1')
@@ -890,10 +869,7 @@ class CellGen(nn.Module):
         if self.mode in ['GF_frozen', 'GF_fine_tuned']:
             # BERT mask: 1 for tokens to keep, 0 for tokens to mask. Thus, negate mask.
             src_attention_mask = ~src_attention_mask.clone().int()
-            enc_output = self.encoder_layers(src_input_id, src_attention_mask)
-        else:
-            # different mask for transformer encoder
-            enc_output = self.encoder_layers(src_input_id, src_attention_mask)
+        enc_output = self.encoder_layers(src_input_id, src_attention_mask)
         return enc_output
 
     def call_decoder(
@@ -912,7 +888,6 @@ class CellGen(nn.Module):
                 src_mask=src_attention_mask,
                 tgt_mask=tgt_pad,
                 enc_output=enc_output,
-                precision=self.precision,
             )
         # :TODO rewrite this part logits not needed for running the other timepoints
 
@@ -1004,18 +979,18 @@ class CellGen(nn.Module):
         -----------
         src_input_id: `torch.Tensor`
             Source token input.
-        tgt_time_step: `int`
-            Target time step.
         not_masked: `bool`
             Whether to mask tokens. Should not be masked for testing and generation.
+        tgt_time_step: `int`
+            Target time step.
         context_mode: `bool`
             Whether to use context mode, where other time steps are used as context.
+        tgt_input_id_dict: `Optional[dict]`
+            Dictionary of target token inputs from different time steps.
         generate_id_dict: `Optional[dict]`
             Dictionary of target token inputs for generation.
         generate_pad_dict: `Optional[dict]`
             Dictionary of target padding masks for generation.
-        tgt_input_id_dict: `Optional[dict]`
-            Dictionary of target token inputs from different time steps.
         Returns:
         --------
         outputs: `dict`
@@ -1030,9 +1005,7 @@ class CellGen(nn.Module):
         else:
             tgt_pad_dict = generate_pad_dict
         src_attention_mask = generate_pad(src_input_id)
-        # BERT mask: 1 for tokens to keep, 0 for tokens to mask. Thus, negate mask.
         enc_output = self.call_encoder(src_input_id, src_attention_mask)
-        # distinction between selected time step and rest time steps
         if (not_masked) and (tgt_input_id_dict is not None):
             dec_embedding_dict = {}
             mean_embedding_dict = {}
