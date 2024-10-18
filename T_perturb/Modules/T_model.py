@@ -1007,13 +1007,16 @@ class CellGen(nn.Module):
         src_attention_mask = generate_pad(src_input_id)
         enc_output = self.call_encoder(src_input_id, src_attention_mask)
         if (not_masked) and (tgt_input_id_dict is not None):
+            # not masked for count prediction and predicted embeddings
             sorted_time_steps = sorted(self.time_steps)
             context_time_steps = sorted_time_steps
         elif not_masked is False:
             if tgt_time_step is None:
+                # randomly select a time step for training
                 sorted_time_steps = [np.random.choice(self.time_steps)]
                 context_time_steps = sorted(self.time_steps)
             elif generate_id_dict is not None:
+                # MASKGIT generation
                 tgt_input_id_dict = generate_id_dict
                 sorted_time_steps = [tgt_time_step]
                 context_time_steps = sorted(self.total_time_steps)
@@ -1038,7 +1041,6 @@ class CellGen(nn.Module):
                     tgt_pad_dict=tgt_pad_dict,
                 )
             if (not_masked is False) & (generate_id_dict is None):
-                print('masking')
                 # apply masking during first stage of MLM training
                 tgt_input_id, labels = self.generate_mask(
                     tgt_input_id,
@@ -1047,7 +1049,6 @@ class CellGen(nn.Module):
                     mask_mode='MASKGIT',
                     mask_scheduler=self.mask_scheduler,
                 )
-                print(tgt_input_id)
             else:
                 # no true labels for MLM loss
                 labels = None
@@ -1076,7 +1077,6 @@ class CellGen(nn.Module):
             mean_embedding_dict[tgt_time_step] = outputs['mean_embedding']
         if len(sorted_time_steps) == 1:
             outputs = outputs
-            print(outputs)
         else:
             outputs['mean_embedding'] = mean_embedding_dict
             outputs['dec_embedding'] = dec_embedding_dict

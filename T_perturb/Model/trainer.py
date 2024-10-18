@@ -39,6 +39,7 @@ from T_perturb.src.utils import (  # WarmupScheduler,
     pearson,
     return_cos_similarity,
     return_gene_embeddings,
+    return_prediction_adata,
 )
 
 # from deepspeed.ops.adam import FusedAdam
@@ -68,7 +69,6 @@ class CellGenTrainer(LightningModule):
         weight_decay: float = 0.0,
         initial_lr: float = 1e-4,
         end_lr: float = 1e-3,
-        # lr_scheduler_patience: float = 5.0,
         return_embeddings: bool = False,
         generate: bool = False,
         time_steps: list = [1, 2],
@@ -115,8 +115,6 @@ class CellGenTrainer(LightningModule):
         self.end_lr = end_lr
         self.num_epochs = num_epochs
         self.warmup_epochs = warmup_epochs
-        # self.lr_scheduler_patience = lr_scheduler_patience
-        # self.lr_scheduler_factor = lr_scheduler_factor
         self.perplexity = Perplexity(ignore_index=-100)
         self.mse = MeanSquaredError()
         if mapping_dict_path is not None:
@@ -205,24 +203,14 @@ class CellGenTrainer(LightningModule):
         # optimizer = FusedAdam(
         #     self.transformer.parameters(), lr=self.lr, weight_decay=self.weight_decay
         # )
-        # lr_scheduler = WarmupCosineLR(
-        #     optimizer,
-        #     total_num_steps=2000,
-        #     # mode='min',
-        #     warmup_type = 'linear',
-        #     # patience=self.lr_scheduler_patience,
-        # )
         return {
             'optimizer': optimizer,
-            # 'lr_scheduler': lr_scheduler,
-            # 'scheduler_type': 'WarmupCosineLR',
             'monitor': 'train/masking_loss',
             # 'interval': 'step',
             # 'lr_scheduler': scheduler,
         }
 
     def training_step(self, batch, *args, **kwargs):
-        # logits, labels, count_output, count_dropout = self.forward(batch)
         outputs = self.forward(batch)
         dec_logits = outputs['dec_logits']
         labels = outputs['labels']
@@ -231,7 +219,6 @@ class CellGenTrainer(LightningModule):
         labels = labels.contiguous().view(-1)
 
         masking_loss = self.masking_loss(dec_logits, labels)
-
         self.log(
             'train/masking_loss',
             masking_loss,
@@ -243,7 +230,6 @@ class CellGenTrainer(LightningModule):
             rank_zero_only=True,
             sync_dist=True,
         )
-
         self.log(
             'train/perplexity',
             perp,
@@ -255,7 +241,6 @@ class CellGenTrainer(LightningModule):
             rank_zero_only=True,
             sync_dist=True,
         )
-
         return masking_loss
 
     def on_train_epoch_end(self):
@@ -399,43 +384,15 @@ class CellGenTrainer(LightningModule):
     def on_test_epoch_end(self):
         if self.return_embeddings:
             print('Start saving embeddings -------------------')
-            cls_embeddings = torch.cat(self.test_dict['cls_embeddings'])
-            true_counts = torch.cat(self.test_dict['true_counts'])
-            cosine_similarities = torch.cat(self.test_dict['cosine_similarities'])
-            batch = torch.cat(self.test_dict['batch'])
-            cell_ids = np.concatenate(self.test_dict['cell_idx'])
-            gene_embeddings = torch.cat(self.test_dict['gene_embeddings'])
-            if len(self.var_list) > 0:
-                var_dict = {}
-                for var in self.var_list:
-                    var_dict[var] = np.concatenate(self.test_dict[var])
-                test_obs = pd.DataFrame(var_dict)
-            else:
-                test_obs = pd.DataFrame()
-            test_obs['batch'] = np.array(batch)
-            test_obs['cell_idx'] = cell_ids
-            adata = ad.AnnData(
-                X=true_counts.numpy(),
-                obs=test_obs,
-                obsm={
-                    'cls_embeddings': cls_embeddings.numpy(),
-                    'gene_embeddings': gene_embeddings.numpy(),
-                },
-                uns={
-                    'marker_genes': self.marker_genes,
-                },
-            )
-            if self.gene_names is not None:
-                adata.var_names = self.gene_names
-            df = pd.DataFrame(
-                cosine_similarities.numpy(), columns=self.marker_genes.keys()
-            )
-            df.index = adata.obs_names
-            adata.obsm['cosine_similarity'] = df
-            # save anndata
-            adata.write_h5ad(
-                f'{self.output_dir}/{self.date}_'
-                f'maskgit_masking_cls_embeddings_cosine_similarity.h5ad'
+            obs_key = self.var_list if len(self.var_list) > 0 else []
+            obs_key.extend(['batch', 'cell_idx'])
+            return_prediction_adata(
+                test_dict=self.test_dict,
+                obs_key=obs_key,
+                marker_genes=self.marker_genes,
+                gene_names=self.gene_names,
+                output_dir=self.output_dir,
+                file_name=f'{self.date}_prediction_embeddings.h5ad',
             )
             print('End saving embeddings -------------------')
 
@@ -540,8 +497,6 @@ class CountDecoderTrainer(LightningModule):
 
         self.weight_decay = weight_decay
         self.lr = lr
-        self.lr_scheduler_patience = lr_scheduler_patience
-        # self.lr_scheduler_factor = lr_scheduler_factor
         self.loss_mode = loss_mode
         self.max_seq_length = max_seq_length
         if (
@@ -686,25 +641,25 @@ class CountDecoderTrainer(LightningModule):
         batch: `Dict[str, torch.Tensor]`
             batch variables capturing technical batch effect variables
         n_samples: `int`
-            number of samples to draw from distribution for zinb and nb
+            number of samples to draw from distribution for zinb and nb loss
 
         Returns:
         --------
-        loss: `torch.Tensor`
-            loss value
-        count_dict: `Dict[str, torch.Tensor]`
-            dictionary containing predicted counts
+        `Tuple[torch.Tensor, Dict[str, torch.Tensor]]` \n
+            - loss: `torch.Tensor`
+                loss value
+            - count_dict: `Dict[str, torch.Tensor]`
+                dictionary containing predicted counts
         """
-        loss_list = []
         count_dict = {}
         dispersion = (
             self.compute_dispersion(batch) if self.loss_mode in ['zinb', 'nb'] else None
         )
-
+        total_loss = 0
         for time_step in self.time_steps:
             count_ouput = outputs[f'count_output_t{time_step}']
             true_values = batch[f'tgt_counts_t{time_step}']
-            batch_size_factor = batch[f'tgt_size_factor_t{time_step}']
+            batch_size_factor = batch[f'tgt_size_factor_t{time_step}'].unsqueeze(1)
 
             if self.loss_mode == 'mse':
                 # change true counts dtype to count output dtype
@@ -717,11 +672,9 @@ class CountDecoderTrainer(LightningModule):
                 )
                 count_dict[time_step] = count_ouput['count_lognorm']
             elif self.loss_mode in ['zinb', 'nb']:
-                dec_mean_gamma = count_ouput['count_mean']
-                dec_mean = dec_mean_gamma * batch_size_factor.unsqueeze(1).expand(
-                    dec_mean_gamma.size(0), dec_mean_gamma.size(1)
+                dec_mean = count_ouput['count_mean'] * batch_size_factor.expand_as(
+                    count_ouput['count_mean']
                 )
-
                 if self.loss_mode == 'zinb':
                     dec_dropout = count_ouput['count_dropout']
                     zinb_distribution = ZeroInflatedNegativeBinomial(
@@ -745,9 +698,8 @@ class CountDecoderTrainer(LightningModule):
                     else:
                         x_pred = nb_distribution.sample((n_samples,))
                         count_dict[time_step] = x_pred.mean(dim=0)
-            loss_list.append(loss)
-        loss = torch.sum(torch.stack(loss_list))
-        return loss, count_dict
+            total_loss += loss
+        return total_loss, count_dict
 
     def training_step(self, batch, *args, **kwargs):
         outputs = self.forward(batch)
@@ -763,18 +715,18 @@ class CountDecoderTrainer(LightningModule):
             sync_dist=True,
         )
 
-        mse_all = []
+        total_mse = 0.0
         for time_step in self.time_steps:
             pred_count = pred_counts_dict[time_step]
             true_count = batch[f'tgt_counts_t{time_step}']
             # MSE
             mse = self.mse(pred_count, true_count)
-            mse_all.append(mse)
+            total_mse += mse
             # gather for validation step
             self.train_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
             self.train_pred_counts_list.append(pred_count)
 
-        mean_mse = torch.mean(torch.stack(mse_all))
+        mean_mse = total_mse / len(self.time_steps)
 
         self.log(
             'train/mse',
@@ -824,19 +776,19 @@ class CountDecoderTrainer(LightningModule):
             sync_dist=True,
         )
         # MSE
-        mse_all = []
+        total_mse = 0.0
 
         for time_step in self.time_steps:
             pred_count = pred_counts_dict[time_step]
             true_count = batch[f'tgt_counts_t{time_step}']
             # MSE
             mse = self.mse(pred_count, true_count)
-            mse_all.append(mse)
+            total_mse += mse
             # gather for validation step
             self.val_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
             self.val_pred_counts_list.append(pred_count)
 
-        mean_mse = torch.mean(torch.stack(mse_all))
+        mean_mse = total_mse / len(self.time_steps)
         self.log(
             'val/mse',
             mean_mse,
