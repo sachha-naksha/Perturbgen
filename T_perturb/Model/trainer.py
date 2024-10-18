@@ -290,9 +290,7 @@ class CellGenTrainer(LightningModule):
                     cos_similarity,
                     cls_embeddings,
                     gene_embeddings,
-                ) = compute_cos_similarity(
-                    outputs=outputs, time_step=time_step, all_time_steps=self.time_steps
-                )
+                ) = compute_cos_similarity(outputs=outputs, time_step=time_step)
                 # # define marker gene list to extract gene embeddings
                 # marker_genes = [
                 #     'IL7R',
