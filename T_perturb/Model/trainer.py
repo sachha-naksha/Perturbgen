@@ -39,7 +39,9 @@ from T_perturb.src.utils import (  # WarmupScheduler,
     pearson,
     return_cos_similarity,
     return_gene_embeddings,
+    return_generation_adata,
     return_prediction_adata,
+    scale_pca,
 )
 
 # from deepspeed.ops.adam import FusedAdam
@@ -381,7 +383,6 @@ class CellGenTrainer(LightningModule):
 
     def on_test_epoch_end(self):
         if self.return_embeddings:
-            print('Start saving embeddings -------------------')
             obs_key = self.var_list if len(self.var_list) > 0 else []
             obs_key.extend(['batch', 'cell_idx'])
             return_prediction_adata(
@@ -392,7 +393,6 @@ class CellGenTrainer(LightningModule):
                 output_dir=self.output_dir,
                 file_name=f'{self.date}_prediction_embeddings.h5ad',
             )
-            print('End saving embeddings -------------------')
 
 
 class CountDecoderTrainer(LightningModule):
@@ -407,8 +407,6 @@ class CountDecoderTrainer(LightningModule):
         loss_mode: str = 'mse',
         lr: float = 1e-3,
         weight_decay: float = 0.0,
-        lr_scheduler_patience: float = 1.0,
-        # lr_scheduler_factor: float = 0.8,
         dropout: float = 0.0,
         generate: bool = False,
         var_list: List[str] = ['Time_point'],
@@ -998,52 +996,29 @@ class CountDecoderTrainer(LightningModule):
                         self.test_dict[var].append(batch[f'{var}_t{time_step}'])
 
     def on_test_epoch_end(self):
-        # TODO: clean up no if and else needed
-        true_counts = torch.cat(self.test_dict['true_counts']).numpy()
-        pred_counts = torch.cat(self.test_dict['pred_counts']).numpy()
-        cell_ids = np.concatenate(self.test_dict['cell_idx'])
         if self.generate:
-            print('---Generating anndata')
-            cls_embeddings = torch.cat(self.test_dict['cls_embeddings']).numpy()
-
-            # create dict to var_list values
-            if len(self.var_list) > 0:
-                var_dict = {}
-                for var in self.var_list:
-                    var_dict[var] = np.concatenate(self.test_dict[var])
-                test_obs = pd.DataFrame(var_dict)
-            else:
-                test_obs = pd.DataFrame()
-            test_obs['cell_idx'] = cell_ids
-            pred_adata = ad.AnnData(X=pred_counts, obs=test_obs)
-            pred_adata.layers['counts'] = true_counts
-            pred_adata.obsm['cls_embeddings'] = cls_embeddings
-            # use scanpy pca to reduce dimensionality
-
-            # create output directory
-            # save adata
-            pred_adata.write_h5ad(
-                f'{self.output_dir}/{self.date}_'
-                f'random_pairing_stratified_pairing_generate_adata_'
-                f't{self.time_steps}_{self.mode}_s{self.seed}_'
-                f'l{self.loss_mode}_n{self.n_samples}'
-                f'_p{self.positional_encoding}_'
-                f'm{self.mask_scheduler}_s{self.sequence_length}.h5ad'
+            obs_key = self.var_list if len(self.var_list) > 0 else []
+            obs_key.extend(['cell_idx'])
+            pred_adata = return_generation_adata(
+                test_dict=self.test_dict,
+                obs_key=obs_key,
+                output_dir=self.output_dir,
+                file_name=(
+                    f'{self.date}_generate_adata_'
+                    f't{self.time_steps}_{self.mode}_s{self.seed}_'
+                    f'l{self.loss_mode}_n{self.n_samples}'
+                    f'_p{self.positional_encoding}_'
+                    f'm{self.mask_scheduler}_s{self.sequence_length}.h5ad'
+                ),
             )
-            print('---anndata generation completed')
-            print('---Start saving metrics')
             # save metrics
             metric_mean = {}
             # true counts are stored in the 'counts' layer
             true_adata = pred_adata.copy()
             true_adata.X = true_adata.layers['counts']
             # log norm and compute PCA
-            sc.pp.normalize_total(pred_adata, target_sum=1e4)
-            sc.pp.log1p(pred_adata)
-            sc.tl.pca(pred_adata, svd_solver='arpack', n_comps=5)
-            sc.pp.normalize_total(true_adata, target_sum=1e4)
-            sc.pp.log1p(true_adata)
-            sc.tl.pca(true_adata, svd_solver='arpack', n_comps=5)
+            pred_adata = scale_pca(pred_adata)
+            true_adata = scale_pca(true_adata)
             # scale pca
             coords = true_adata.obsm['X_pca']
             coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
@@ -1091,33 +1066,33 @@ class CountDecoderTrainer(LightningModule):
                 f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
             )
 
-        else:
-            var_dict = {}
-            for var in self.var_list:
-                var_dict[var] = np.concatenate(self.test_dict[var])
-            test_obs = pd.DataFrame(var_dict)
-            pred_adata = ad.AnnData(X=pred_counts.numpy(), obs=test_obs)
-            pred_adata.layers['counts'] = true_counts.numpy()
-            pred_adata.write_h5ad(f'{self.output_dir}/pred_adata.h5ad')
-            # true counts are stored in the 'counts' layer
-            true_adata = pred_adata.copy()
-            true_adata.X = true_adata.layers['counts']
-            # ----------------- calculate metrics -----------------
-            # MSE
-            lin_reg_df = lin_reg_summary(true_adata, pred_adata)
-            mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
-            emd = evaluate_emd(true_adata, pred_adata)
-            metric_df = pd.concat([lin_reg_df, mmd_df, emd], axis=1)
-            metric_df.to_csv(f'{self.output_dir}/test_metrics.csv')
-            emd['metric'] = 'emd'
-            emd = emd.rename(columns={'emd': 'value'})
-            self.log(
-                'test/emd',
-                emd['value'].mean(),
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
+        # else:
+        #     var_dict = {}
+        #     for var in self.var_list:
+        #         var_dict[var] = np.concatenate(self.test_dict[var])
+        #     test_obs = pd.DataFrame(var_dict)
+        #     pred_adata = ad.AnnData(X=pred_counts.numpy(), obs=test_obs)
+        #     pred_adata.layers['counts'] = true_counts.numpy()
+        #     pred_adata.write_h5ad(f'{self.output_dir}/pred_adata.h5ad')
+        #     # true counts are stored in the 'counts' layer
+        #     true_adata = pred_adata.copy()
+        #     true_adata.X = true_adata.layers['counts']
+        #     # ----------------- calculate metrics -----------------
+        #     # MSE
+        #     lin_reg_df = lin_reg_summary(true_adata, pred_adata)
+        #     mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
+        #     emd = evaluate_emd(true_adata, pred_adata)
+        #     metric_df = pd.concat([lin_reg_df, mmd_df, emd], axis=1)
+        #     metric_df.to_csv(f'{self.output_dir}/test_metrics.csv')
+        #     emd['metric'] = 'emd'
+        #     emd = emd.rename(columns={'emd': 'value'})
+        #     self.log(
+        #         'test/emd',
+        #         emd['value'].mean(),
+        #         on_epoch=True,
+        #         prog_bar=True,
+        #         logger=True,
+        #     )
 
     def configure_optimizers(self):
         # optimizer = FusedAdam(
