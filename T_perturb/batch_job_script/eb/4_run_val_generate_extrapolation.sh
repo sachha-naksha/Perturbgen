@@ -1,13 +1,13 @@
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
 #BSUB -gpu 'mode=exclusive_process:num=1:' # request for exclusive access to gpu
-#BSUB -n 16 # number of cores
+#BSUB -n 8 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/eb_generate_extra_s100_%J.out # output file
 #BSUB -e logs/eb_generate_extra_s100_%J.err # error file
-#BSUB -M 50000  # RAM memory part 2. Default: 100MB
-#BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
+#BSUB -M 20000  # RAM memory part 2. Default: 100MB
+#BSUB -R 'select[mem>20000] rusage[mem=20000]' # RAM memory part 1. Default: 100MB
 #BSUB -J eb_generate_extra_s100 # job name
 
 # load cuda
@@ -40,7 +40,7 @@ python3 $cwd/val.py \
 --splitting_mode random \
 --generate True \
 --output_dir $RES_DIR/$RES_NAME/res \
---ckpt_count_path './T_perturb/T_perturb/plt/res/eb/extrapolation/res/checkpoints/20241022_1100_cellgen_train_count_lr_0.0001_wd_0.0001_batch_64_zinb_tp_1-2_s_42_pos_sin_learnt_m_cosine-epoch=79.ckpt' \
+--ckpt_count_path './T_perturb/T_perturb/plt/res/eb/extrapolation/res/checkpoints/20241023_1336_cellgen_train_count_lr_0.0001_wd_0.0001_batch_64_zinb_tp_1-2_s_42_pos_sin_learnt_m_cosine-epoch=99.ckpt' \
 --src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_src/Day 00-03.dataset' \
 --tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_tgt' \
 --src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src/Day 00-03.h5ad' \
@@ -55,7 +55,7 @@ python3 $cwd/val.py \
 --num_layers 3 \
 --d_ff 32 \
 --loss_mode zinb \
---n_workers 16 \
+--n_workers 8 \
 --pred_tps 3 \
 --context_tps 1 2 \
 --var_list Time_point \

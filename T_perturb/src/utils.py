@@ -43,6 +43,7 @@ class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
 
     def get_lr(self):
         current_step = self.last_epoch + 1
+        print('current step', current_step)
         if current_step < self.warmup_steps:
             # Linear warmup phase: increase from initial_lr to end_lr
             warmup_lr = [

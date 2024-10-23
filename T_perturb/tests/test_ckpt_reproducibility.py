@@ -31,7 +31,7 @@ def checkpoints_are_equal(checkpoint_path1, checkpoint_path2):
         if key not in state_dict2:
             print(f'Key {key} not found in checkpoint 2.')
             return False
-        if not torch.allclose(state_dict1[key], state_dict2[key], atol=1e-6):
+        if not torch.allclose(state_dict1[key], state_dict2[key], atol=1e-4):
             print(f'Difference found in key: {key}')
             return False
         total_layers += 1

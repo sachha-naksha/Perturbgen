@@ -451,71 +451,51 @@ def main() -> None:
 
     # Initialize model module
     # ----------------------------------------------------------------------------------
+    test_kwargs = {
+        'tgt_vocab_size': args.tgt_vocab_size,
+        'd_model': 512,
+        'num_heads': 8,
+        'num_layers': args.num_layers,
+        'd_ff': args.d_ff,
+        'max_seq_length': args.max_len + 100,
+        'dropout': 0,
+        'generate': args.generate,
+        'context_tps': args.context_tps,
+        'pred_tps': args.pred_tps,
+        'n_total_tps': n_total_tps,
+        'mask_scheduler': args.mask_scheduler,
+        'positional_encoding': args.positional_encoding,
+        'output_dir': args.output_dir,
+        'mode': args.mode,
+        'context_mode': args.context_mode,
+        'var_list': args.var_list,
+    }
     if args.test_mode == 'masking':
-        pretrained_module = CellGenTrainer(
-            tgt_vocab_size=args.tgt_vocab_size,
-            d_model=512,
-            num_heads=8,
-            num_layers=args.num_layers,
-            d_ff=args.d_ff,
-            max_seq_length=args.max_len + 100,
-            dropout=args.cellgen_dropout,
-            weight_decay=args.cellgen_wd,
-            end_lr=args.cellgen_lr,
-            mask_scheduler=args.mask_scheduler,
-            # lr_scheduler_patience=5.0,
-            # lr_scheduler_factor=0.8,
-            return_embeddings=args.return_embeddings,
-            generate=args.generate,
-            pred_tps=args.pred_tps,
-            n_total_tps=n_total_tps,
-            mapping_dict_path=args.mapping_dict_path,
-            positional_encoding=args.positional_encoding,
-            gene_names=tgt_adata_tmp.var['gene_name'],
-            output_dir=args.output_dir,
-            var_list=args.var_list,
-            mode=args.mode,
-            context_mode=args.context_mode,
-            context_tps=args.context_tps,
-        )
+        test_kwargs['weight_decay'] = args.cellgen_wd
+        test_kwargs['end_lr'] = args.cellgen_lr
+        test_kwargs['return_embeddings'] = args.return_embeddings
+        test_kwargs['mapping_dict_path'] = args.mapping_dict_path
+        test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
+        pretrained_module = CellGenTrainer(**test_kwargs)
     elif args.test_mode == 'count':
-        decoder_module = CountDecoderTrainer(
-            ckpt_masking_path=args.ckpt_masking_path,
-            ckpt_count_path=args.ckpt_count_path,
-            tgt_vocab_size=args.tgt_vocab_size,
-            d_model=512,
-            num_heads=8,
-            num_layers=args.num_layers,
-            d_ff=args.d_ff,
-            max_seq_length=args.max_len + 100,
-            loss_mode=args.loss_mode,
-            lr=args.count_lr,
-            weight_decay=args.count_wd,
-            # lr_scheduler_patience=5.0,
-            # lr_scheduler_factor=0.8,
-            conditions=conditions_,
-            conditions_combined=conditions_combined_,
-            dropout=args.count_dropout,
-            generate=args.generate,
-            tgt_adata=tgt_adatas,
-            pred_tps=args.pred_tps,
-            n_total_tps=n_total_tps,
-            temperature=args.temperature,
-            iterations=args.iterations,
-            mask_scheduler=args.mask_scheduler,
-            output_dir=args.output_dir,
-            var_list=args.var_list,
-            n_samples=3,
-            mode=args.mode,
-            seed=args.seed,
-            positional_encoding=args.positional_encoding,
-            sequence_length=args.sequence_length,
-            context_mode=args.context_mode,
-            n_genes=tgt_adata_tmp.X.shape[1],
-            unique_gene_list=unique_token_dict,
-            shared_gene_list=shared_token_dict,
-            context_tps=args.context_tps,
-        )
+        test_kwargs['ckpt_masking_path'] = args.ckpt_masking_path
+        test_kwargs['ckpt_count_path'] = args.ckpt_count_path
+        test_kwargs['loss_mode'] = args.loss_mode
+        test_kwargs['weight_decay'] = args.count_wd
+        test_kwargs['lr'] = args.count_lr
+        test_kwargs['conditions'] = conditions_
+        test_kwargs['conditions_combined'] = conditions_combined_
+        test_kwargs['tgt_adata'] = tgt_adatas
+        test_kwargs['temperature'] = args.temperature
+        test_kwargs['iterations'] = args.iterations
+        test_kwargs['sequence_length'] = args.sequence_length
+        test_kwargs['tgt_adata'] = tgt_adatas
+        test_kwargs['n_samples'] = 3
+        test_kwargs['seed'] = args.seed
+        test_kwargs['n_genes'] = src_adata.shape[1]
+        test_kwargs['unique_gene_list'] = unique_token_dict
+        test_kwargs['shared_gene_list'] = shared_token_dict
+        decoder_module = CountDecoderTrainer(**test_kwargs)
     else:
         raise ValueError('test_mode not recognised, needs to be masking or count')
 

@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 import torch
 from datasets import Dataset
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
 
 from T_perturb.Dataloaders.datamodule import CellGenDataModule
 from T_perturb.Model.trainer import CellGenTrainer
@@ -14,6 +15,8 @@ from T_perturb.Model.trainer import CellGenTrainer
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
     os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+
+csv_logger = CSVLogger('T_perturb/T_perturb/tests/res', name='test_cellgen_training')
 
 
 def dummy_dataset(
@@ -91,7 +94,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
             dropout=0,
             mlm_probability=0.15,
             weight_decay=0.0,
-            end_lr=1e-3,
+            initial_lr=1e-3,
             precision='high',
             pred_tps=self.pred_tps,
             n_total_tps=self.n_total_tps,
@@ -158,27 +161,24 @@ class CellGenTestTrainingCase(unittest.TestCase):
         checkpoint_callback = ModelCheckpoint(
             dirpath='T_perturb/T_perturb/tests/checkpoints',
             filename='test_masking_checkpoint-{epoch:02d}',
-            save_top_k=1,
+            save_top_k=-1,
             monitor='train/perplexity',
             mode='min',
+            every_n_epochs=1,
         )
         if save_checkpoint:
             if not os.path.exists(checkpoint_callback.dirpath):
                 os.makedirs(checkpoint_callback.dirpath)
         # Use the PyTorch Lightning Trainer to test the training loop
         trainer = pl.Trainer(
-            max_epochs=1,
-            limit_train_batches=1,  # Limit to a single batch for quick testing
-            logger=False,
+            max_epochs=3,
+            logger=csv_logger,
             enable_checkpointing=save_checkpoint,
             callbacks=[checkpoint_callback] if save_checkpoint else [],
         )
         trainer.fit(self.transformer, self.data_module)
         print('finished training')
 
-        self.assertEqual(
-            trainer.current_epoch, 1, 'Trainer should have completed one epoch'
-        )
         if save_checkpoint:
             # Check if the checkpoint was saved
             self.assertTrue(

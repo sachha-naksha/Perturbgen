@@ -33,8 +33,7 @@ from T_perturb.src.metric import (
     evaluate_mmd,
     lin_reg_summary,
 )
-from T_perturb.src.utils import (
-    WarmupScheduler,
+from T_perturb.src.utils import (  # WarmupScheduler,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
@@ -197,28 +196,40 @@ class CellGenTrainer(LightningModule):
         return outputs
 
     def configure_optimizers(self):
-        parameters = [{'params': self.transformer.parameters(), 'lr': self.end_lr}]
+        parameters = [{'params': self.transformer.parameters(), 'lr': self.initial_lr}]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
-        number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
+        # number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
         # total_steps = self.num_epochs * number_of_batches_per_epoch
-        warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
-        scheduler = WarmupScheduler(
-            optimizer,
-            warmup_steps=warmup_steps,
-            initial_lr=self.initial_lr,
-            end_lr=self.end_lr,
-        )
+        # warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
+        # scheduler = WarmupScheduler(
+        #     optimizer,
+        #     warmup_steps=warmup_steps,
+        #     initial_lr=self.initial_lr,
+        #     end_lr=self.end_lr,
+        # )
         # optimizer = FusedAdam(
         #     self.transformer.parameters(), lr=self.lr, weight_decay=self.weight_decay
         # )
         return {
             'optimizer': optimizer,
             'monitor': 'train/masking_loss',
-            'interval': 'step',
-            'lr_scheduler': scheduler,
+            # 'lr_scheduler': {
+            #     'scheduler': scheduler,
+            #     'interval': 'step',
+            #     'frequency': 1
+            # }
         }
 
     def training_step(self, batch, *args, **kwargs):
+        # log learning rate
+        self.log(
+            'lr',
+            self.trainer.optimizers[0].param_groups[0]['lr'],
+            on_step=True,
+            on_epoch=False,
+            prog_bar=True,
+            logger=True,
+        )
         outputs = self.forward(batch)
         dec_logits = outputs['dec_logits']
         labels = outputs['labels']
@@ -683,10 +694,8 @@ class CountDecoderTrainer(LightningModule):
                     if n_samples == 1:
                         count_dict[time_step] = dec_mean
                     else:
-                        print('sampling from zinb')
                         # sample from distribution
                         x_pred = zinb_distribution.sample((n_samples,))
-                        print('x_pred', x_pred)
                         count_dict[time_step] = x_pred.mean(dim=0)
 
                 elif self.loss_mode == 'nb':

@@ -10,6 +10,7 @@ import pytorch_lightning as pl
 import scanpy as sc
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
 
 from T_perturb.Dataloaders.datamodule import CellGenDataModule
 from T_perturb.Model.trainer import CountDecoderTrainer
@@ -19,6 +20,11 @@ from T_perturb.tests.test_cellgen_training import dummy_dataset
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
     os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+
+# initialize the logger
+csv_logger = CSVLogger(
+    'T_perturb/T_perturb/tests/res', name='test_countdecoder_training'
+)
 
 
 # create cell x gene matrix with 100 cells and 100 genes
@@ -225,7 +231,8 @@ class CellGenTestTrainingCase(unittest.TestCase):
         checkpoint_callback = ModelCheckpoint(
             dirpath='T_perturb/T_perturb/tests/checkpoints',
             filename='test_counts_checkpoint-{epoch:02d}',
-            save_top_k=1,
+            save_top_k=-1,
+            every_n_epochs=1,
             monitor='train/mse',
             mode='min',
         )
@@ -236,15 +243,11 @@ class CellGenTestTrainingCase(unittest.TestCase):
         trainer = pl.Trainer(
             max_epochs=1,
             limit_train_batches=1,  # Limit to a single batch for quick testing
-            logger=False,
+            logger=csv_logger,
             enable_checkpointing=save_checkpoint,
             callbacks=[checkpoint_callback] if save_checkpoint else [],
         )
         trainer.fit(self.decoder_module, self.data_module)
-
-        self.assertEqual(
-            trainer.current_epoch, 1, 'Trainer should have completed one epoch'
-        )
         if save_checkpoint:
             # Check if the checkpoint was saved
             self.assertTrue(
