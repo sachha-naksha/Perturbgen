@@ -4,7 +4,7 @@
 #BSUB -gpu 'mode=exclusive_process:num=2' # request for exclusive access to gpu
 #BSUB -n 16 # number of cores
 #BSUB -G teamtrynka # groupname for billing
-#BSUB -cwd /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb # working directory
+#BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/eb_masking_extra_cont_generation_%J.out # output file
 #BSUB -e logs/eb_masking_extra_cont_generation_%J.err # error file
 #BSUB -M 20000  # RAM memory part 2. Default: 100MB
@@ -15,11 +15,11 @@
 module load cuda-12.1.1
 
 # activate python environment
-source /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/.cellgen_4096/bin/activate
+source /lustre/scratch126/cellgen/team361/kl11/t_generative/.cellgen_4096/bin/activate
 cwd=$(pwd)
 
 # ----------------- Create folder to save results and copy the script -----------------
-RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/plt/res"
+RES_DIR="/lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/plt/res"
 RES_NAME="eb/extrapolation"
 # if directory does not exist, create it with the name $RES_NAME
 mkdir -p $RES_DIR/$RES_NAME
@@ -35,7 +35,7 @@ echo '--- Start computing model'
 
 # ----------------- Extrapolation -----------------
 # # python3 $cwd/train.py \
-python3 /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/train.py \
+python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/train.py \
 --train_mode masking \
 --split False \
 --splitting_mode random \

@@ -23,9 +23,9 @@ from T_perturb.src.utils import (
     stratified_split,
 )
 
-if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
+if os.getcwd().split('/')[-1] != 't_generative':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative')
     print('Changed working directory to root of repository')
 
 
@@ -540,13 +540,6 @@ def main() -> None:
     else:
         raise ValueError('train_mode not recognised, needs to be masking or count')
 
-    # if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
-    #     # set working directory to root of repository
-    #     os.chdir(
-    #         '/lustre/scratch123/hgi/projects/healthy_imm_expr/'
-    #         't_generative/T_perturb/T_perturb/'
-    #     )
-    #     print('Changed working directory to root of repository')
     # #collate deepzero checkpoint
     # if torch.cuda.device_count() > 1:
     #     save_path = f'./Model/checkpoints/{filename}'

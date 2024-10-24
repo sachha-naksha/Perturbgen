@@ -25,7 +25,7 @@ np.random.seed(seed_no)
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
     print('Changed working directory to root of repository')
 
 
@@ -161,7 +161,7 @@ if args.gene_filtering_mode == 'hvg':
 elif args.gene_filtering_mode == 'degs':
     # Filter adata for only DEGs
     degs = pd.read_csv(
-        '/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/'
+        '/lustre/scratch126/cellgen/team361/kl11/t_generative/'
         'generative_modelling_omic_notebooks/'
         'pp/res/deg/significant_deg_1.5logfc_0.05padj_hvg_5k.csv'
     )
