@@ -33,12 +33,11 @@ from T_perturb.src.metric import (
     evaluate_mmd,
     lin_reg_summary,
 )
-from T_perturb.src.utils import (  # WarmupScheduler,
+from T_perturb.src.utils import (  # WarmupScheduler,; return_gene_embeddings,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
     return_cos_similarity,
-    return_gene_embeddings,
     return_generation_adata,
     return_prediction_adata,
     scale_pca,
@@ -352,39 +351,38 @@ class CellGenTrainer(LightningModule):
                 #     'HLA-DRA',
                 #     'HLA-DRB1',
                 # ]
-                marker_genes = [
-                    'CHMP7',
-                    'MDM4',
-                    'TNRC6B',
-                    'GPA33',
-                    'RBM6',
-                    'FCGR3A',
-                    'SGK1',
-                    'CLC',
-                    'FOS',
-                    'ARC',
-                    'AKAP13',
-                    'TNIP3',
-                    'IL6',
-                ]
+                # marker_genes = [
+                #     'CHMP7',
+                #     'MDM4',
+                #     'TNRC6B',
+                #     'GPA33',
+                #     'RBM6',
+                #     'FCGR3A',
+                #     'SGK1',
+                #     'CLC',
+                #     'FOS',
+                #     'ARC',
+                #     'AKAP13',
+                #     'TNIP3',
+                #     'IL6',
+                # ]
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
-                    marker_genes=marker_genes,
                     cos_similarity=cos_similarity,
                     gene_embeddings=gene_embeddings,
                     mapping_dict=self.gene_to_tokenid,
                     token_ids=token_ids,
                 )
-                marker_gene_embeddings = return_gene_embeddings(
-                    marker_genes=marker_genes,
-                    gene_embeddings=gene_embeddings,
-                    mapping_dict=self.gene_to_tokenid,
-                    token_ids=token_ids,
-                )
+                # marker_gene_embeddings = return_gene_embeddings(
+                #     marker_genes=marker_genes,
+                #     gene_embeddings=gene_embeddings,
+                #     mapping_dict=self.gene_to_tokenid,
+                #     token_ids=token_ids,
+                # )
                 self.marker_genes = marker_genes_dict
                 true_counts = batch[f'tgt_counts_t{time_step}'].detach().cpu()
                 cls_embeddings = cls_embeddings.detach().cpu()
                 cos_similarity = marker_cos_similarity.detach().cpu()
-                gene_embeddings = marker_gene_embeddings.detach().cpu()
+                # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
                 self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)

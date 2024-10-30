@@ -242,11 +242,11 @@ def compute_cos_similarity(
 
 
 def return_cos_similarity(
-    marker_genes: List[str],
     cos_similarity: torch.tensor,
     gene_embeddings: torch.tensor,
     mapping_dict: Dict,
     token_ids: torch.tensor,
+    marker_genes: Optional[List[str]] = None,
 ) -> torch.tensor:
     """
     Description:
@@ -269,13 +269,19 @@ def return_cos_similarity(
     marker_genes_dict: `Dict`
     """
     # filter for marker genes and swap key value
-    marker_genes_ids = {v: k for k, v in mapping_dict.items() if v in marker_genes}
+    if marker_genes is not None:
+        marker_genes_ids = {v: k for k, v in mapping_dict.items() if v in marker_genes}
+    else:
+        # exclude special tokens from marker genes
+        special_tokens = ['<cls>', '<mask>', '<pad>', '<eos>']
+        marker_genes_ids = {
+            v: k for k, v in mapping_dict.items() if v not in special_tokens
+        }
     cos_similarity_res = torch.zeros(
         cos_similarity.shape[0],
         len(marker_genes_ids.keys()),
         device=gene_embeddings.device,
     )
-
     marker_genes_dict = {}
     for i, gene in enumerate(marker_genes_ids.keys()):
         # extract cosine similarity for marker genes
@@ -383,9 +389,25 @@ def return_prediction_adata(
     true_counts = torch.cat(test_dict['true_counts'], dim=0).numpy()
     # adata.obsm
     cls_embeddings = torch.cat(test_dict['cls_embeddings'], dim=0).numpy()
-    gene_embeddings = torch.cat(test_dict['gene_embeddings'], dim=0).numpy()
+    # gene_embeddings = torch.cat(test_dict['gene_embeddings'], dim=0).numpy()
     cos_similarity = torch.cat(test_dict['cosine_similarities'], dim=0).numpy()
     cos_similarity_df = pd.DataFrame(cos_similarity, columns=marker_genes.keys())
+    # remove all non-expressed genes
+    cos_similarity_df = cos_similarity_df.loc[:, (cos_similarity_df != 0).any(axis=0)]
+
+    # add condition from additional obs_key
+    # to cos_similarity_df to rank cosine similarity
+    # cos_similarity_df_ = cos_similarity_df.replace(0, np.nan)
+    # print(cos_similarity_df_)
+    # cos_similarity_df_['diff_state'] = np.concatenate(test_dict['diff_state'])
+
+    # # group by diff_state and calculate non-zero mean cosine similarity
+    # cos_similarity_df_mean = cos_similarity_df_.groupby(
+    #     'diff_state'
+    #     ).mean(numeric_only=True)
+
+    # print(cos_similarity_df_mean)
+    # raise
     # adata.obs
     obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
     test_obs = pd.DataFrame(obs_dict)
@@ -398,7 +420,7 @@ def return_prediction_adata(
         var=test_var if gene_names is not None else None,
         obsm={
             'cls_embeddings': cls_embeddings,
-            'gene_embeddings': gene_embeddings,
+            # 'gene_embeddings': gene_embeddings,
         },
         uns={
             'marker_genes': marker_genes,
