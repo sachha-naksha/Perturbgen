@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import (
     Dict,
     List,
+    Literal,
     Optional,
 )
 
@@ -795,9 +796,10 @@ def generate_pad(tgt):
 
 def pairing_src_to_tgt_cells(
     adata_subset: sc.AnnData,
-    pairing_mode: str,
+    pairing_mode: Literal['random', 'stratified'],
     pairing_obs: str,
     seed_no: int = 42,
+    mapping_df=Optional[pd.DataFrame],
 ):
     """
     Description:
@@ -827,15 +829,16 @@ def pairing_src_to_tgt_cells(
     cell_pairings: Dict[str, List[str]] = {}
     max_rows = 0
     max_reference_time = None
-    for adata_tmp in adata_subset_.obs[pairing_obs].unique():
-        adata_dict[adata_tmp] = adata_subset_.obs.loc[
-            adata_subset_.obs[pairing_obs] == adata_tmp, :
+    for category in adata_subset_.obs[pairing_obs].unique():
+        adata_dict[category] = adata_subset_.obs.loc[
+            adata_subset_.obs[pairing_obs] == category, :
         ]
-        cell_pairings[adata_tmp] = []
-        # Check if this adata_tmp has more rows than the current maximum
-        if len(adata_dict[adata_tmp]) > max_rows:
-            max_rows = len(adata_dict[adata_tmp])
-            max_reference_time = adata_tmp
+        cell_pairings[category] = []
+        # Check if this category has more rows than the current maximum
+        if len(adata_dict[category]) > max_rows:
+            max_rows = len(adata_dict[category])
+            max_reference_time = category
+    print('max ref:', max_reference_time)
     if pairing_mode == 'stratified':
         # drop Donor if they do not have Cell_type, Donor in all the Time_points
         adata_grouped = adata_subset_.obs[
@@ -862,7 +865,26 @@ def pairing_src_to_tgt_cells(
             cell_pairings['16h'].append(np.random.choice(indices_16h))
             cell_pairings['40h'].append(np.random.choice(indices_40h))
             cell_pairings['5d'].append(np.random.choice(indices_5d))
+    if pairing_mode == 'mapping':
+        for condition in mapping_df[max_reference_time].unique():
+            mapping_df_ = mapping_df[mapping_df[max_reference_time] == condition]
+            adata_ = adata_dict[max_reference_time]
+            cell_to_pair = adata_['celltype_v2'][
+                adata_['celltype_v2'].isin(mapping_df_[max_reference_time])
+            ].index
+            cell_pairings[max_reference_time].extend(cell_to_pair)
+            n_cells_to_pair = len(cell_to_pair)
 
+            for stage, adata_ in adata_dict.items():
+                if stage != max_reference_time:
+                    cell_to_pair = adata_['celltype_v2'][
+                        adata_['celltype_v2'].isin(mapping_df_[stage])
+                    ].index
+                    cell_pairings[stage].extend(
+                        np.random.choice(cell_to_pair, n_cells_to_pair, replace=True)
+                    )
+                else:
+                    continue
     elif pairing_mode == 'random':
         if max_reference_time is not None:
             # randomly sample from each time point

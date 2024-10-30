@@ -11,9 +11,10 @@ from datasets import load_from_disk
 from geneformer import TranscriptomeTokenizer
 from scipy.sparse import csr_matrix, issparse
 
-from T_perturb.src.utils import (  # tokenid_mapping,; pairing_src_to_tgt_cells,
+from T_perturb.src.utils import (  # tokenid_mapping,;
     map_ensembl_to_genename,
     map_input_ids_to_row_id,
+    pairing_src_to_tgt_cells,
     str2bool,
     subset_adata,
     tokenid_mapping,
@@ -47,7 +48,7 @@ def get_args():
     parser.add_argument(
         '--gene_filtering_mode',
         type=str,
-        default='all',
+        default='hvg',
         choices=['hvg', 'degs', 'all'],
         help='Gene filtering mode: hvg or degs',
     )
@@ -83,9 +84,9 @@ def get_args():
     parser.add_argument(
         '--pairing_mode',
         type=str,
-        default='stratified',
-        # default='random',
-        choices=['stratified', 'random'],
+        # default='stratified',
+        default='mapping',
+        choices=['stratified', 'random', 'mapping'],
         help='Cell pairing mode',
     )
     parser.add_argument(
@@ -281,7 +282,7 @@ if not os.path.exists(output_tmp_dir):
     os.makedirs(output_tmp_dir)
 
 adata_subset.write_h5ad(
-    f'{output_tmp_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
+    f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
 )
 print('Finished preprocessing adata.')
 print('Start tokenisation of adata...')
@@ -307,10 +308,11 @@ tk = TranscriptomeTokenizer(
 )
 # time it
 # Proceed with your main logic
+file_name = f'{args.dataset}_{args.gene_filtering_mode}'
 tk.tokenize_data(
-    data_directory=paired_h5ad_dir,
+    data_directory=output_tmp_dir,
     output_directory=output_dir,
-    output_prefix=(f'{args.dataset}_{args.gene_filtering_mode}'),
+    output_prefix=file_name,
     file_format='h5ad',  # format [loom, h5ad]
     use_generator=False,
 )
@@ -319,41 +321,21 @@ tk.tokenize_data(
 print('Finished tokenisation.')
 # ---------------- Cell pairing and save adata/dataset by time point ----------------
 # filter and save dataset by time point
-dataset = load_from_disk('T_perturb/T_perturb/pp/res/hspc/dataset_hvg/hspc_hvg.dataset')
+dataset = load_from_disk(f'{output_dir}/{file_name}.dataset')
 # load csv
 mapping_df = pd.read_csv('T_perturb/T_perturb/pp/res/hspc/cd34_pos_mapping.csv')
 adata_subset = sc.read_h5ad(
-    f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
+    f'{output_tmp_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
 )
-# create cell pairings for each hierarchical stage a separate list
-cell_pairings: Dict[str, list] = {stage: [] for stage in mapping_df.columns}
-for cell_type in mapping_df['2_terminal'].unique():
-    mapping_df_ = mapping_df[mapping_df['2_terminal'] == cell_type]
-    cell_to_pair = adata_subset.obs['celltype_v2'][
-        adata_subset.obs['celltype_v2'].isin(mapping_df_['2_terminal'])
-    ].index
-    cell_pairings['2_terminal'].extend(cell_to_pair)
-    print(mapping_df_['2_terminal'])
-    n_cells_to_pair = len(cell_to_pair)
-    for stage in mapping_df_.columns:
-        if stage == '2_terminal':
-            continue
-        else:
-            cell_to_pair = adata_subset.obs['celltype_v2'][
-                adata_subset.obs['celltype_v2'].isin(mapping_df_[stage])
-            ].index
-            print(mapping_df_[stage])
-            cell_pairings[stage].extend(
-                np.random.choice(cell_to_pair, n_cells_to_pair, replace=True)
-            )
 
 # # Pairing resting to activated cells and tokenise individual datasets
-# cell_pairings = pairing_src_to_tgt_cells(
-#     adata_subset=adata_subset,
-#     pairing_mode=args.pairing_mode,
-#     pairing_obs='Time_point',
-#     seed_no=seed_no,
-# )
+cell_pairings = pairing_src_to_tgt_cells(
+    adata_subset=adata_subset,
+    pairing_mode=args.pairing_mode,
+    pairing_obs='diff_state',
+    seed_no=seed_no,
+    mapping_df=mapping_df,
+)
 
 paired_dataset_dir = (
     f'./T_perturb/T_perturb/res/{args.dataset}/' f'dataset_{args.gene_filtering_mode}'
