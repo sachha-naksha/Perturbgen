@@ -197,8 +197,7 @@ token_to_genename = {
 }
 # save token_dict
 with open(
-    f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
-    f'token_id_to_genename_{args.gene_filtering_mode}.pkl',
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}/' f'token_id_to_genename_all.pkl',
     'wb',
 ) as file:
     pickle.dump(token_to_genename, file)

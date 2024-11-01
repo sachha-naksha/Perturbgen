@@ -393,8 +393,7 @@ def return_prediction_adata(
     cos_similarity = torch.cat(test_dict['cosine_similarities'], dim=0).numpy()
     cos_similarity_df = pd.DataFrame(cos_similarity, columns=marker_genes.keys())
     # remove all non-expressed genes
-    cos_similarity_df = cos_similarity_df.loc[:, (cos_similarity_df != 0).any(axis=0)]
-
+    cos_similarity_df = cos_similarity_df.loc[:, cos_similarity_df.sum() != 0]
     # add condition from additional obs_key
     # to cos_similarity_df to rank cosine similarity
     # cos_similarity_df_ = cos_similarity_df.replace(0, np.nan)
