@@ -43,7 +43,7 @@ def get_args():
         type=str,
         # default='cytoimmgen',
         default='hspc',
-        choices=['cytoimmgen', 'eb', 'hspc'],
+        choices=['cytoimmgen', 'eb', 'hspc', 'mnc'],
     )
     parser.add_argument(
         '--gene_filtering_mode',
@@ -309,7 +309,7 @@ tk = TranscriptomeTokenizer(
 # Proceed with your main logic
 file_name = f'{args.dataset}_{args.gene_filtering_mode}'
 tk.tokenize_data(
-    data_directory=output_tmp_dir,
+    data_directory=paired_h5ad_dir,
     output_directory=output_dir,
     output_prefix=file_name,
     file_format='h5ad',  # format [loom, h5ad]
@@ -324,7 +324,7 @@ dataset = load_from_disk(f'{output_dir}/{file_name}.dataset')
 # load csv
 mapping_df = pd.read_csv('T_perturb/T_perturb/pp/res/hspc/cd34_pos_mapping.csv')
 adata_subset = sc.read_h5ad(
-    f'{output_tmp_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
+    f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
 )
 
 # # Pairing resting to activated cells and tokenise individual datasets

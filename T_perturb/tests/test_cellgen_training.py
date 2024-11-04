@@ -14,7 +14,7 @@ from T_perturb.Model.trainer import CellGenTrainer
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
 
 csv_logger = CSVLogger('T_perturb/T_perturb/tests/res', name='test_cellgen_training')
 
@@ -98,7 +98,8 @@ class CellGenTestTrainingCase(unittest.TestCase):
             precision='high',
             pred_tps=self.pred_tps,
             n_total_tps=self.n_total_tps,
-            mode='Transformer_encoder',
+            pos_encoding_mode='time_pos_sin',
+            encoder='Transformer_encoder',
             mapping_dict_path=(
                 './T_perturb/T_perturb/pp/res/'
                 'cytoimmgen/token_id_to_genename_hvg.pkl'

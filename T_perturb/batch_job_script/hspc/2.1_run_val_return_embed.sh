@@ -6,8 +6,8 @@
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/return_embed_%J.out # output file
 #BSUB -e logs/return_embed_%J.err # error file
-#BSUB -M 150000  # RAM memory part 2. Default: 100MB
-#BSUB -R "select[mem>150000] rusage[mem=150000]" # RAM memory part 1. Default: 100MB
+#BSUB -M 50000  # RAM memory part 2. Default: 100MB
+#BSUB -R "select[mem>50000] rusage[mem=50000]" # RAM memory part 1. Default: 100MB
 #BSUB -J return_embed # job name
 
 # load cuda
@@ -40,7 +40,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --splitting_mode stratified \
 --return_embed True \
 --generate False \
---ckpt_masking_path "./T_perturb/T_perturb/plt/res/hspc/embedding/res/checkpoints/20241030_1516_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_psin_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt" \
+--ckpt_masking_path "./T_perturb/T_perturb/plt/res/hspc/embeddings/res/checkpoints/20241101_1632_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_psin_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt" \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/hspc/dataset_hvg_src/stem.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/hspc/dataset_hvg_tgt" \
@@ -48,8 +48,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --tgt_adata_folder "./T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_hvg_tgt" \
 --mapping_dict_path "T_perturb/T_perturb/pp/res/hspc/token_id_to_genename_hvg.pkl" \
 --batch_size 256 \
---max_len 300 \
---tgt_vocab_size 1254 \
+--max_len 450 \
+--tgt_vocab_size 1187 \
 --cellgen_lr 0.0001 \
 --cellgen_wd 0.0001 \
 --count_lr 0.00005 \

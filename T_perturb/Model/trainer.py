@@ -77,10 +77,10 @@ class CellGenTrainer(LightningModule):
         num_epochs: int = 5,
         warmup_epochs: int = 1,
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
-        mode: str = 'GF_fine_tuned',
+        encoder: str = 'GF_fine_tuned',
         mask_scheduler: str = 'cosine',
         context_mode: bool = True,
-        positional_encoding: Literal[
+        pos_encoding_mode: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
         precision: Literal['high', 'medium'] = 'medium',
@@ -88,12 +88,13 @@ class CellGenTrainer(LightningModule):
         gene_names: Optional[List[str]] = None,
         mapping_dict_path: Optional[str] = None,
         context_tps: Optional[List[int]] = None,
-        *args,
-        **kwargs,
+        # *args,
+        # **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.save_hyperparameters()
         set_matmul_precision_for_device(precision)
+        print('start training')
         if context_tps is None:
             context_tps = pred_tps
         self.transformer = CellGen(
@@ -108,9 +109,9 @@ class CellGenTrainer(LightningModule):
             pred_tps=pred_tps,
             context_tps=context_tps,
             n_total_tps=n_total_tps,
-            mode=mode,
+            encoder=encoder,
             mask_scheduler=mask_scheduler,
-            position_embedding=positional_encoding,
+            pos_encoding_mode=pos_encoding_mode,
         )
         self.masking_loss = nn.CrossEntropyLoss()
         self.timepoint_loss = nn.CrossEntropyLoss()
@@ -387,7 +388,7 @@ class CellGenTrainer(LightningModule):
                 self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
                 self.test_dict['cosine_similarities'].append(cos_similarity)
-                self.test_dict['gene_embeddings'].append(gene_embeddings)
+                # self.test_dict['gene_embeddings'].append(gene_embeddings)
                 self.test_dict['batch'].append(combined_batch)
                 self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{time_step}'])
                 if len(self.var_list) > 0:
@@ -430,14 +431,14 @@ class CountDecoderTrainer(LightningModule):
         n_samples: int = 1,
         precision: Literal['high', 'medium'] = 'medium',
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
-        mode: str = 'GF_fine_tuned',
+        encoder: str = 'GF_fine_tuned',
         mapping_dict_path: str = (
             './T_perturb/Geneformer/geneformer/' 'token_dictionary_gc95M.pkl'
         ),
         seed: int = 42,
         context_mode: bool = True,
         n_genes: int = 25426,
-        positional_encoding: Literal[
+        pos_encoding_mode: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
         mask_scheduler: Optional[str] = 'cosine',
@@ -475,10 +476,10 @@ class CountDecoderTrainer(LightningModule):
             pred_tps=pred_tps,
             context_tps=context_tps,
             n_total_tps=n_total_tps,
-            mode=mode,
-            position_embedding=positional_encoding,
+            encoder=encoder,
+            pos_encoding_mode=pos_encoding_mode,
         )
-        self.positional_encoding = positional_encoding
+        self.pos_encoding_mode = pos_encoding_mode
         # load PETRA checkpoint
         if ckpt_masking_path is not None:
             checkpoint = torch.load(ckpt_masking_path, map_location='cpu')
@@ -572,7 +573,7 @@ class CountDecoderTrainer(LightningModule):
                 self.test_dict[var] = []
         else:
             self.var_list = []
-        self.mode = mode
+        self.encoder = encoder
         self.seed = seed
         self.date = datetime.now().strftime('%Y%m%d-%H:%M')
         # guided generation
@@ -1020,9 +1021,9 @@ class CountDecoderTrainer(LightningModule):
                 output_dir=self.output_dir,
                 file_name=(
                     f'{self.date}_generate_adata_'
-                    f't{self.pred_tps}_{self.mode}_s{self.seed}_'
+                    f't{self.pred_tps}_{self.encoder}_s{self.seed}_'
                     f'l{self.loss_mode}_n{self.n_samples}'
-                    f'_p{self.positional_encoding}_'
+                    f'_p{self.pos_encoding_mode}_'
                     f'm{self.mask_scheduler}_s{self.sequence_length}.h5ad'
                 ),
             )
@@ -1076,7 +1077,7 @@ class CountDecoderTrainer(LightningModule):
             mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
             metrics = pd.concat([metrics, emd_df, lin_reg_df, mmd_df], axis=1)
             metrics.to_csv(
-                f'{self.output_dir}/{self.date}_p{self.positional_encoding}_'
+                f'{self.output_dir}/{self.date}_p{self.pos_encoding_mode}_'
                 f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
                 f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
             )

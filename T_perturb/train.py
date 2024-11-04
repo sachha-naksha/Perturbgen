@@ -211,7 +211,7 @@ def get_args():
         default=0.2,
     )
     parser.add_argument(
-        '--mode',
+        '--encoder',
         default='GF_frozen',
         type=str,
         choices=[
@@ -222,10 +222,10 @@ def get_args():
         help='mode of encoder',
     )
     parser.add_argument(
-        '--positional_encoding',
+        '--pos_encoding_mode',
         type=str,
         default='time_pos_sin',
-        choices=['time_pos_sin', 'comb_sin', 'sin_learnt'],
+        choices=['time_pos_sin', 'comb_sin', 'sin_learnt', 'time_pos_learnt'],
         help='positional encoding',
     )
     parser.add_argument(
@@ -353,10 +353,10 @@ def main() -> None:
         'pred_tps': args.pred_tps,
         'context_tps': args.context_tps,
         'n_total_tps': n_total_tps,
-        'mode': args.mode,
+        'encoder': args.encoder,
         'output_dir': args.output_dir,
         'context_mode': args.context_mode,
-        'positional_encoding': args.positional_encoding,
+        'pos_encoding_mode': args.pos_encoding_mode,
     }
     if args.train_mode == 'masking':
         trainer_kwargs['dropout'] = args.cellgen_dropout
@@ -438,7 +438,7 @@ def main() -> None:
         filename = (
             f'{run_id}_train_{args.train_mode}_lr_{args.cellgen_lr}'
             f'_wd_{args.cellgen_wd}_batch_{args.batch_size}_'
-            f'p{args.positional_encoding}_m_{args.mask_scheduler}'
+            f'p{args.pos_encoding_mode}_m_{args.mask_scheduler}'
             f'_tp_{time_steps_str}_s_{args.seed}'
         )
         if val_indices:
@@ -451,7 +451,7 @@ def main() -> None:
             f'{run_id}_train_{args.train_mode}_lr_{args.count_lr}_wd_{args.count_wd}_'
             f'batch_{args.batch_size}_'
             f'{args.loss_mode}_tp_{time_steps_str}_s_'
-            f'{args.seed}_pos_{args.positional_encoding}_m_{args.mask_scheduler}'
+            f'{args.seed}_pos_{args.pos_encoding_mode}_m_{args.mask_scheduler}'
         )
         if val_indices:
             monitor_metric = 'val/mse'

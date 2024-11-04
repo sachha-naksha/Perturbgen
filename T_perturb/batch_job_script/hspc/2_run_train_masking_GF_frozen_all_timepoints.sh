@@ -23,14 +23,14 @@ echo "--- Start computing model"
 
 # # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/plt/res"
-RES_NAME="hspc/embedding"
-# if directory does not exist, create it with the name $RES_NAME
-mkdir -p $RES_DIR/$RES_NAME
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# copy the current script to the result directory
-cp $0 $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_all_timepoints_$TIMESTAMP.sh
-echo "Copying script to $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_all_timepoints_$TIMESTAMP.sh"
+RES_NAME="hspc/embeddings"
+# # if directory does not exist, create it with the name $RES_NAME
+# mkdir -p $RES_DIR/$RES_NAME
+# # Get the current timestamp
+# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# # copy the current script to the result directory
+# cp $0 $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_all_timepoints_$TIMESTAMP.sh
+# echo "Copying script to $RES_DIR/$RES_NAME/2_run_train_masking_GF_frozen_all_timepoints_$TIMESTAMP.sh"
 
 # ----------------- all_timepoints -----------------
 # python3 $cwd/train.py \
@@ -45,9 +45,9 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --tgt_adata_folder "./T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_hvg_tgt" \
 --mapping_dict_path  "./T_perturb/T_perturb/pp/res/hspc/token_id_to_genename_hvg.pkl" \
 --batch_size 64 \
---max_len 300 \
+--max_len 450 \
 --epochs 10 \
---tgt_vocab_size 1254 \
+--tgt_vocab_size 1187 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
 --mlm_prob 0.15 \
@@ -56,8 +56,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --num_layers 6 \
 --pred_tps 1 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
---mode GF_frozen \
+--encoder GF_frozen \
 --context_mode True \
 --mask_scheduler 'cosine' \
---positional_encoding 'sin_learnt'
+--pos_encoding_mode 'time_pos_learnt'
 echo "--- Finished computing model"

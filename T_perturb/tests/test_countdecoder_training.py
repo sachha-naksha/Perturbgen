@@ -19,7 +19,7 @@ from T_perturb.tests.test_cellgen_training import dummy_dataset
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
 
 # initialize the logger
 csv_logger = CSVLogger(
@@ -183,7 +183,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
             precision='high',
             mask_scheduler='pow',
             output_dir='./T_perturb/T_perturb/plt/res/',
-            mode='Transformer_encoder',
+            encoder='Transformer_encoder',
             seed=42,
         )
         self.decoder_module = decoder_module

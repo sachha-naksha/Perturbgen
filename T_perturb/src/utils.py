@@ -901,8 +901,18 @@ def pairing_src_to_tgt_cells(
                     cell_to_pair = adata_['celltype_v2'][
                         adata_['celltype_v2'].isin(mapping_df_[stage])
                     ].index
+                    # only sample with replacement if needed
+                    if n_cells_to_pair > cell_to_pair.shape[0]:
+                        print(mapping_df_[stage])
+                        sample_with_replacement = True
+                    else:
+                        sample_with_replacement = False
                     cell_pairings[stage].extend(
-                        np.random.choice(cell_to_pair, n_cells_to_pair, replace=True)
+                        np.random.choice(
+                            cell_to_pair,
+                            n_cells_to_pair,
+                            replace=sample_with_replacement,
+                        )
                     )
                 else:
                     continue

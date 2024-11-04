@@ -15,7 +15,7 @@ from T_perturb.tests.test_countdecoder_training import dummy_cell_gene_matrix
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
 
 
 class CellGenTestEmbeddingCase(unittest.TestCase):
@@ -139,7 +139,7 @@ class CellGenTestEmbeddingCase(unittest.TestCase):
             mapping_dict_path='./T_perturb/T_perturb/pp/res/'
             'cytoimmgen/token_id_to_genename_hvg.pkl',
             output_dir='./T_perturb/T_perturb/tests/res',
-            mode='Transformer_encoder',
+            encoder='Transformer_encoder',
             var_list=None,
         )
         self.decoder_module = decoder_module

@@ -221,7 +221,7 @@ def get_args():
         help='List of variables to keep in the dataset',
     )
     parser.add_argument(
-        '--mode',
+        '--encoder',
         default='GF_frozen',
         type=str,
         choices=[
@@ -244,7 +244,7 @@ def get_args():
         help='context mode for timepoints',
     )
     parser.add_argument(
-        '--positional_encoding',
+        '--pos_encoding_mode',
         type=str,
         default='time_pos_sin',
         help='positional encoding',
@@ -266,7 +266,7 @@ def get_args():
 def main() -> None:
     """Run training."""
     args = get_args()
-    print('positional encoding:', args.positional_encoding)
+    print('positional encoding:', args.pos_encoding_mode)
 
     # PyTorch Lightning allows to set all necessary seeds in one function call.
     pl.seed_everything(args.seed)
@@ -464,9 +464,9 @@ def main() -> None:
         'pred_tps': args.pred_tps,
         'n_total_tps': n_total_tps,
         'mask_scheduler': args.mask_scheduler,
-        'positional_encoding': args.positional_encoding,
+        'pos_encoding_mode': args.pos_encoding_mode,
         'output_dir': args.output_dir,
-        'mode': args.mode,
+        'encoder': args.encoder,
         'context_mode': args.context_mode,
         'var_list': args.var_list,
     }
@@ -546,17 +546,17 @@ def main() -> None:
     if torch.cuda.device_count() > 1:
         # multi gpu training with group logging
         wandb_logger = WandbLogger(
-            project='ttransformer_sweep',
+            project='ttransformer',
             name=f'{run_id}_{str(uuid.uuid4())[:6]}',
             save_dir='./T_perturb/T_perturb/wandb/wandb',
-            log_model='all',
+            log_model=True,
         )  # noqa
     else:
         wandb_logger = WandbLogger(
-            project='ttransformer_sweep',
+            project='ttransformer',
             name=f'{run_id}',
             save_dir='./T_perturb/T_perturb/wandb/wandb',
-            log_model='all',
+            log_model=True,
         )
 
     # In this simple example we just check if a GPU is available.
