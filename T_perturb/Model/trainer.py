@@ -37,6 +37,7 @@ from T_perturb.src.utils import (  # WarmupScheduler,; return_gene_embeddings,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
+    return_attn_weights,
     return_cos_similarity,
     return_generation_adata,
     return_prediction_adata,
@@ -71,6 +72,7 @@ class CellGenTrainer(LightningModule):
         initial_lr: float = 1e-4,
         end_lr: float = 1e-3,
         return_embeddings: bool = False,
+        return_attn: bool = False,
         generate: bool = False,
         pred_tps: list = [1, 2],
         n_total_tps: int = 3,
@@ -97,6 +99,7 @@ class CellGenTrainer(LightningModule):
         print('start training')
         if context_tps is None:
             context_tps = pred_tps
+        self.context_tps = context_tps
         self.transformer = CellGen(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -112,6 +115,7 @@ class CellGenTrainer(LightningModule):
             encoder=encoder,
             mask_scheduler=mask_scheduler,
             pos_encoding_mode=pos_encoding_mode,
+            return_attn=return_attn,
         )
         self.masking_loss = nn.CrossEntropyLoss()
         self.timepoint_loss = nn.CrossEntropyLoss()
@@ -129,8 +133,25 @@ class CellGenTrainer(LightningModule):
                 'rb',
             ) as f:
                 gene_to_tokenid = pickle.load(f)
-        # change to token_id to gene name
-        self.gene_to_tokenid = gene_to_tokenid
+        with open(
+            './T_perturb/Geneformer/geneformer/ensembl_mapping_dict_gc95M.pkl',
+            'rb',
+        ) as f:
+            all_gene_to_ensemblid = pickle.load(f)
+            print('all_gene_to_ensemblid', all_gene_to_ensemblid)
+            raise
+        with open(
+            './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
+            'rb',
+        ) as f:
+            ensemblid_to_tokenid = pickle.load(f)
+        self.all_gene_to_tokenid = {
+            k: ensemblid_to_tokenid[v]
+            for k, v in all_gene_to_ensemblid.items()
+            if v in ensemblid_to_tokenid
+        }
+        # swarp key and value
+        self.gene_to_tokenid = {v: k for k, v in gene_to_tokenid.items()}
         self.return_embeddings = return_embeddings
         self.generate = generate
         self.tgt_vocab_size = tgt_vocab_size
@@ -301,87 +322,41 @@ class CellGenTrainer(LightningModule):
     def test_step(self, batch, *args, **kwargs):
         if self.return_embeddings:
             outputs = self.forward(batch)
-            for time_step in self.pred_tps:
-                token_ids = batch[f'tgt_input_ids_t{time_step}']
-                (
-                    cos_similarity,
-                    cls_embeddings,
-                    gene_embeddings,
-                ) = compute_cos_similarity(outputs=outputs, time_step=time_step)
-                # # define marker gene list to extract gene embeddings
-                # marker_genes = [
-                #     'IL7R',
-                #     'CD52',
-                #     'GIMAP7',
-                #     'SARAF',
-                #     'BTG1',
-                #     'LTB',
-                #     'CXCR4',
-                #     'STAT1',
-                #     'IRF1',
-                #     'IFIT3',
-                #     'GBP1',
-                #     'SYNE2',
-                #     'SOCS3',
-                #     'IL4R',
-                #     'CD69',
-                #     'MIR155HG',
-                #     'DDX21',
-                #     'TNFRSF4',
-                #     'HSP90AA1',
-                #     'HSP90AB1',
-                #     'HSPA8',
-                #     'TXN',
-                #     'FABP5',
-                #     'TUBA1B',
-                #     'HMGA1',
-                #     'PCNA',
-                #     'IL2RA',
-                #     'BATF',
-                #     'CD63',
-                #     'IFITM2',
-                #     'CORO1B',
-                #     'ISG15',
-                #     'ALDOC',
-                #     'DDIT4',
-                #     'LGALS1',
-                #     'S100A4',
-                #     'S100A6',
-                #     'VIM',
-                #     'CD74',
-                #     'HLA-DRA',
-                #     'HLA-DRB1',
-                # ]
-                # marker_genes = [
-                #     'CHMP7',
-                #     'MDM4',
-                #     'TNRC6B',
-                #     'GPA33',
-                #     'RBM6',
-                #     'FCGR3A',
-                #     'SGK1',
-                #     'CLC',
-                #     'FOS',
-                #     'ARC',
-                #     'AKAP13',
-                #     'TNIP3',
-                #     'IL6',
-                # ]
+
+            for t in self.pred_tps:
+                token_ids = batch[f'tgt_input_ids_t{t}']
+                context_tps = [tp for tp in self.context_tps if tp != t]
+                # extract context_ids
+                context_ids = [batch['src_input_ids']]
+                context_ids.extend(
+                    [batch[f'tgt_input_ids_t{tp}'] for tp in context_tps]
+                )
+                # 1. compute cosine similarity
+                cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
+                # 2. map cosine similarity to corresponding genes
+
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
                     cos_similarity=cos_similarity,
-                    gene_embeddings=gene_embeddings,
                     mapping_dict=self.gene_to_tokenid,
                     token_ids=token_ids,
                 )
                 # marker_gene_embeddings = return_gene_embeddings(
                 #     marker_genes=marker_genes,
-                #     gene_embeddings=gene_embeddings,
+                #     gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],,
                 #     mapping_dict=self.gene_to_tokenid,
                 #     token_ids=token_ids,
                 # )
+                self_attn_weights, cross_attn_weights = return_attn_weights(
+                    outputs=outputs,
+                    tgt_mapping_dict=self.gene_to_tokenid,
+                    src_mapping_dict=self.all_gene_to_tokenid,
+                    time_step=t,
+                    token_ids=token_ids,
+                    context_token_ids=context_ids,
+                )
                 self.marker_genes = marker_genes_dict
-                true_counts = batch[f'tgt_counts_t{time_step}'].detach().cpu()
-                cls_embeddings = cls_embeddings.detach().cpu()
+                true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
+                cls_embeddings = outputs['mean_embedding'][t].detach().cpu()
                 cos_similarity = marker_cos_similarity.detach().cpu()
                 # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
@@ -390,10 +365,10 @@ class CellGenTrainer(LightningModule):
                 self.test_dict['cosine_similarities'].append(cos_similarity)
                 # self.test_dict['gene_embeddings'].append(gene_embeddings)
                 self.test_dict['batch'].append(combined_batch)
-                self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{time_step}'])
+                self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
                 if len(self.var_list) > 0:
                     for var in self.var_list:
-                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
+                        self.test_dict[var].append(batch[f'{var}_t{t}'])
 
     def on_test_epoch_end(self):
         if self.return_embeddings:

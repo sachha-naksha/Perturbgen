@@ -185,177 +185,6 @@ class PositionalEncoding(nn.Module):
             return x + time_pe + pos_pe
 
 
-# class SepSinPositionalEncoding(nn.Module):
-#     def __init__(
-#         self,
-#         d_model: int,
-#         length: int,
-#         mode: Literal[
-#             'GF_frozen', 'GF_fine_tuned', 'Transformer_encoder'
-#         ] = 'GF_frozen',
-#     ):
-#         '''
-#         Description:
-#         ------------
-#         Positional encoding for the transformer model.
-#         This will create separate positional encodings
-#         for the time steps and the ranks.
-
-#         Parameters:
-#         -----------
-#         d_model: `int`
-#             Token embedding dimension.
-#         length: `int`
-#             Length of the positional encoding.
-#         mode: Literal['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
-#             Mode of the transformer encoder.
-#         Two options:
-#             - encoding positional information of the gene ranking:
-#                 length = total_vocab_size
-#             - encoding positional information of the time steps:
-#                 length = n_time_steps
-
-#         Returns:
-#         --------
-#         x: `torch.Tensor`
-#             Token embeddings with positional encoding.
-#             Shape ``[batch_size, seq_len, d_model]``
-#         '''
-#         # train time steps and interpolation timestep
-#         # TODO: Need to be changed if running the Encoder model
-#         super(SepSinPositionalEncoding, self).__init__()
-#         if mode in ['GF_frozen', 'GF_fine_tuned']:
-#             total_seq_length = length
-#         elif mode == 'Transformer_encoder':
-#             # add one time step to included src time step
-#             total_seq_length = length + 1
-#         pe = torch.zeros(total_seq_length, d_model)
-#         position = torch.arange(0, total_seq_length, dtype=torch.float).unsqueeze(1)
-#         div_term = torch.exp(
-#             torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
-#         )
-#         pe[:, 0::2] = torch.sin(position * div_term)
-#         pe[:, 1::2] = torch.cos(position * div_term)
-#         self.register_buffer('pe', pe.unsqueeze(0))
-#         self.mode = mode
-
-#     def forward(self, x, tgt_time_step=None):
-#         if tgt_time_step is not None:
-#             if self.mode in ['GF_frozen', 'GF_fine_tuned']:
-#                 tgt_time_step_ = tgt_time_step - 1
-#             elif self.mode == 'Transformer_encoder':
-#                 # start from 0 to include src time step
-#                 tgt_time_step_ = tgt_time_step
-#             pe = self.pe[:, tgt_time_step_]  # -1 to start from 0
-#             pe = pe.unsqueeze(0).expand(x.size(0), x.size(1), -1)
-#         else:
-#             pe = self.pe[:, : x.size(1)]
-#         return x + pe
-
-
-# class CombSinPositionalEncoding(nn.Module):
-#     def __init__(
-#         self,
-#         d_model,
-#         max_seq_length,
-#         n_time_steps,
-#         mode=Literal['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder'],
-#     ):
-#         '''
-#         Description:
-#         ------------
-#         Positional encoding for the transformer model.
-#         Two separate positional encodings are used, depending on the mode:
-#         - Geneformer: BERT positional encoding is from pre-trained model.
-#         - Transformer_encoder: Sinusoidal positional encoding is used.
-#         Parameters:
-#         -----------
-#         d_model: `int`
-#             Token embedding dimension.
-#         max_seq_length: `int`
-#             Maximum sequence length.
-#         n_time_steps: `int`
-#             Number of time steps for training.
-#         mode: `str`
-#             Mode of transformer encoder.
-#             Options: ['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
-#         Returns:
-#         --------
-#         x: `torch.Tensor`
-#             Token embeddings with positional encoding.
-#         '''
-#         # train time steps and interpolation timestep
-#         # TODO: separate timestep positional encoding
-#         # and positional encoding for the ranks
-#         super(CombSinPositionalEncoding, self).__init__()
-#         self.max_seq_length = max_seq_length
-#         if mode in ['GF_frozen', 'GF_fine_tuned']:
-#             total_seq_length = n_time_steps * max_seq_length
-#         elif mode == 'Transformer_encoder':
-#             # add one time step to included src time step
-#             total_seq_length = (n_time_steps + 1) * max_seq_length
-#         self.mode = mode
-#         pe = torch.zeros(total_seq_length, d_model)
-#         position = torch.arange(0, total_seq_length, dtype=torch.float).unsqueeze(1)
-#         div_term = torch.exp(
-#             torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model)
-#         )
-#         pe[:, 0::2] = torch.sin(position * div_term)
-#         pe[:, 1::2] = torch.cos(position * div_term)
-#         self.register_buffer('pe', pe.unsqueeze(0))
-
-#     def forward(self, x, tgt_time_step=None):
-#         if self.mode in ['GF_frozen', 'GF_fine_tuned']:
-#             tgt_time_step_ = tgt_time_step - 1
-#         elif self.mode == 'Transformer_encoder':
-#             # start from 0 to include src time step
-#             tgt_time_step_ = tgt_time_step
-#         if tgt_time_step is not None:
-#             start_pos = (tgt_time_step_) * self.max_seq_length
-#             end_pos = start_pos + x.size(1)
-#             pe = self.pe[:, start_pos:end_pos]
-#         else:
-#             pe = self.pe[:, : x.size(1)]
-#         return x + pe
-
-
-# class LearntPositionalEncoding(nn.Module):
-#     '''
-#     Description:
-#     ------------
-#     Learnt positional encoding for the transformer model.
-
-#     Parameters:
-#     -----------
-#     d_model: `int`
-#         Token embedding dimension.
-#     max_seq_length: `int`
-#         Maximum sequence length.
-
-#     Returns:
-#     --------
-#     x: `torch.Tensor`
-#         Token embeddings with positional encoding.
-#         Shape ``[batch_size, seq_len, d_model]``
-#     '''
-
-#     def __init__(self, d_model, max_seq_length):
-#         super(LearntPositionalEncoding, self).__init__()
-#         self.pos_embeddings = nn.Embedding(max_seq_length, d_model)
-#         # Register a buffer for position IDs,
-#         # precomputed for the maximum sequence length
-#         position_ids = torch.arange(max_seq_length).expand((1, -1))
-#         self.register_buffer('position_ids', position_ids)
-
-#     def forward(self, x, position_ids=None):
-#         # TODO: register buffer
-#         if position_ids is None:
-#             position_ids = self.position_ids[:, : x.size(1)]
-#         position_ids = position_ids.expand(x.size(0), -1)
-
-#         return x + self.pos_embeddings(position_ids)
-
-
 class Mlp(nn.Module):
     def __init__(
         self,
@@ -391,6 +220,7 @@ class CrossAttention(nn.Module):
         dim_head: int = 64,
         dropout: float = 0.0,
         context_dim: Optional[int] = None,
+        return_attn: bool = False,
     ):
         '''
         Description:
@@ -424,8 +254,11 @@ class CrossAttention(nn.Module):
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, query_dim), nn.Dropout(dropout)  # projection head
         )
+        self.return_attn = return_attn
+        self.dim_head = dim_head
+        self.num_heads = num_heads
 
-    def normal_attention(self, q, k, v, h, mask=None):
+    def normal_attention(self, q, k, v, h, mask=None, return_attn=False):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
         sim = einsum('b i d, b j d -> b i j', q, k) * self.scale
         if mask is not None:
@@ -436,9 +269,11 @@ class CrossAttention(nn.Module):
         attn = sim.softmax(dim=-1)
         out = einsum('b i j, b j d -> b i d', attn, v)
         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
-        return out
+        if return_attn:
+            return out, attn
+        return out, attn
 
-    def sdpa_attention(self, q, k, v, h, mask=None):
+    def sdpa_attention(self, q, k, v, h, mask=None, return_attn=False, identity=None):
         _, seq_len_q, _ = q.shape
         _, seq_len_k, _ = k.shape
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=h), (q, k, v))
@@ -449,16 +284,27 @@ class CrossAttention(nn.Module):
             mask = mask.expand(-1, h, seq_len_q, seq_len_k)
             # negate mask so that padding tokens=False
             mask = ~mask
+        if return_attn & (identity is not None):
+            identity = identity.expand(q.size(0), self.num_heads, -1, -1)
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
-            out = scaled_dot_product_attention(
+            out_ = scaled_dot_product_attention(
                 query=q,
                 key=k,
-                value=v,
+                value=identity if return_attn else v,
                 attn_mask=mask,
                 is_causal=False,
             )
+        if return_attn:
+            out = out_ @ v
+            attn = out_
+            # average attention weights over heads
+            attn = attn.mean(dim=1)
+        else:
+            out = out_
+            attn = None
+        del out_
         out = rearrange(out, ' b h n d -> b n (h d)', h=h)
-        return out
+        return out, attn
 
     def forward(
         self,
@@ -473,15 +319,25 @@ class CrossAttention(nn.Module):
             context = x
         k = self.to_k(context)
         v = self.to_v(context)
-
+        if self.return_attn:
+            identity = torch.eye(k.size(1), device=k.device)
         if attention_mode == 'normal':
-            out = self.normal_attention(q, k, v, h, mask)
+            out, attn = self.normal_attention(
+                q, k, v, h, mask, return_attn=self.return_attn
+            )
         elif attention_mode == 'sdpa':
-            out = self.sdpa_attention(q, k, v, h, mask)
+            out, attn = self.sdpa_attention(
+                q,
+                k,
+                v,
+                h,
+                mask,
+                return_attn=self.return_attn,
+                identity=identity,
+            )
         else:
             raise ValueError(f'Invalid attention mode: {attention_mode}')
-
-        return self.to_out(out)
+        return self.to_out(out), attn
 
 
 class Block(nn.Module):
@@ -495,6 +351,7 @@ class Block(nn.Module):
         act_layer: nn.Module = nn.GELU,
         norm_layer: nn.Module = nn.LayerNorm,
         context_dim: Optional[int] = None,
+        return_attn: bool = False,
     ):
         '''
         Description:
@@ -529,7 +386,11 @@ class Block(nn.Module):
         self.norm1 = norm_layer(dim)
         # self attention by not passing context dim
         self.self_attn = CrossAttention(
-            query_dim=dim, num_heads=num_heads, dim_head=d_ff, dropout=dropout
+            query_dim=dim,
+            num_heads=num_heads,
+            dim_head=d_ff,
+            dropout=dropout,
+            return_attn=return_attn,
         )
         self.norm2 = norm_layer(dim)
         self.cross_attn = CrossAttention(
@@ -538,6 +399,7 @@ class Block(nn.Module):
             num_heads=num_heads,
             dim_head=d_ff,
             dropout=dropout,
+            return_attn=return_attn,
         )
         self.norm3 = norm_layer(dim)
         self.feed_forward = Mlp(
@@ -546,14 +408,15 @@ class Block(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, src_mask=None, tgt_mask=None, enc_output=None):
-        attn_output = self.self_attn(x, mask=tgt_mask)
-        x = self.norm1(x + self.dropout(attn_output))
-        attn_output = self.cross_attn(x, context=enc_output, mask=src_mask)
-        x = self.norm2(x + self.dropout(attn_output))  # disabled residual connection
+        attn_out, self_attn_weigths = self.self_attn(x, mask=tgt_mask)
+        x = self.norm1(x + self.dropout(attn_out))
+        attn_out, cross_attn_weights = self.cross_attn(
+            x, context=enc_output, mask=src_mask
+        )
+        x = self.norm2(x + self.dropout(attn_out))  # disabled residual connection
         ff_output = self.feed_forward(x)
         x = self.norm3(x + self.dropout(ff_output))
-
-        return x
+        return x, self_attn_weigths, cross_attn_weights
 
 
 class Geneformerwrapper(nn.Module):
@@ -732,6 +595,7 @@ class CellGen(nn.Module):
         pos_encoding_mode: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt', 'time_pos_learnt'
         ] = 'time_pos_sin',
+        return_attn: bool = False,
         context_tps: Optional[List[int]] = None,
     ):
         '''
@@ -828,6 +692,7 @@ class CellGen(nn.Module):
                     d_ff=d_ff,
                     hidden_size=d_model,
                     dropout=dropout,
+                    return_attn=return_attn,
                 )
                 for _ in range(num_layers)
             ]
@@ -961,19 +826,27 @@ class CellGen(nn.Module):
         time_random,
         labels=None,
     ):
+        self_attn_list = []
+        cross_attn_list = []
         for dec_layer in self.decoder_block:
             # see if concatenation of cls embedding
-            dec_embedding = dec_layer(
+            dec_embedding, self_attn_weights, cross_attn_weights = dec_layer(
                 x=dec_embedding,
                 src_mask=src_attention_mask,
                 tgt_mask=tgt_pad,
                 enc_output=enc_output,
             )
+            self_attn_list.append(self_attn_weights)
+            cross_attn_list.append(cross_attn_weights)
+        # also convert to float 16 for memory efficiency
+        self_attn_weights = torch.stack(self_attn_list).mean(dim=0).to(torch.float16)
+        cross_attn_weights = torch.stack(cross_attn_list).mean(dim=0).to(torch.float16)
         # :TODO rewrite this part logits not needed for running the other timepoints
-
         decoder_logits = self.decoder_fc(dec_embedding)
         outputs = {
             'dec_embedding': dec_embedding,
+            'self_attn_weights': self_attn_weights,
+            'cross_attn_weights': cross_attn_weights,
             'dec_logits': decoder_logits,
             'labels': labels,
             'selected_time_step': time_random,
@@ -1091,6 +964,8 @@ class CellGen(nn.Module):
                 sorted_time_steps = [tgt_time_step]
         dec_embedding_dict = {}
         mean_embedding_dict = {}
+        cross_attn_weights_dict = {}
+        self_attn_weights_dict = {}
         for tgt_time_step in sorted_time_steps:
             tgt_pad = tgt_pad_dict[f'tgt_pad_t{tgt_time_step}']
             if tgt_input_id_dict is not None:
@@ -1134,11 +1009,15 @@ class CellGen(nn.Module):
             )
             dec_embedding_dict[tgt_time_step] = outputs['dec_embedding']
             mean_embedding_dict[tgt_time_step] = outputs['mean_embedding']
+            self_attn_weights_dict[tgt_time_step] = outputs['self_attn_weights']
+            cross_attn_weights_dict[tgt_time_step] = outputs['cross_attn_weights']
         if len(sorted_time_steps) == 1:
             outputs = outputs
         else:
             outputs['mean_embedding'] = mean_embedding_dict
             outputs['dec_embedding'] = dec_embedding_dict
+            outputs['self_attn_weights'] = self_attn_weights_dict
+            outputs['cross_attn_weights'] = cross_attn_weights_dict
         return outputs
 
 

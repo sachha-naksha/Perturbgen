@@ -232,18 +232,17 @@ def compute_cos_similarity(
         # gene level cosine similarity
         cos_similarity_ = cosine_similarity(
             cls_embeddings[i],
-            gene_embeddings[i, :, :],
+            dec_embedding[i, :, :],
             dim=1,
         )
         cos_similarity.append(cos_similarity_)
     cos_similarity = torch.stack(cos_similarity)
 
-    return cos_similarity, cls_embeddings, gene_embeddings
+    return cos_similarity
 
 
 def return_cos_similarity(
     cos_similarity: torch.tensor,
-    gene_embeddings: torch.tensor,
     mapping_dict: Dict,
     token_ids: torch.tensor,
     marker_genes: Optional[List[str]] = None,
@@ -258,8 +257,6 @@ def return_cos_similarity(
         List of marker genes.
     cos_similarity: `torch.tensor`
         Tensor of cosine similarity between cls and gene embeddings.
-    gene_embeddings: `torch.tensor`
-        Tensor of gene embeddings.
     mapping_dict: `Dict`
         Dictionary mapping gene names to token ids.
     Returns:
@@ -270,17 +267,17 @@ def return_cos_similarity(
     """
     # filter for marker genes and swap key value
     if marker_genes is not None:
-        marker_genes_ids = {v: k for k, v in mapping_dict.items() if v in marker_genes}
+        marker_genes_ids = {v: k for v, k in mapping_dict.items() if v in marker_genes}
     else:
         # exclude special tokens from marker genes
         special_tokens = ['<cls>', '<mask>', '<pad>', '<eos>']
         marker_genes_ids = {
-            v: k for k, v in mapping_dict.items() if v not in special_tokens
+            v: k for v, k in mapping_dict.items() if v not in special_tokens
         }
     cos_similarity_res = torch.zeros(
         cos_similarity.shape[0],
         len(marker_genes_ids.keys()),
-        device=gene_embeddings.device,
+        device=cos_similarity.device,
     )
     marker_genes_dict = {}
     for i, gene in enumerate(marker_genes_ids.keys()):
@@ -293,6 +290,135 @@ def return_cos_similarity(
         ]
         marker_genes_dict[gene] = i
     return cos_similarity_res, marker_genes_dict
+
+
+def return_attn_weights(
+    outputs: dict,
+    src_mapping_dict: Dict,
+    tgt_mapping_dict: Dict,
+    time_step: int,
+    token_ids: torch.tensor,
+    marker_genes: Optional[List[str]] = None,
+    context_token_ids: Optional[torch.tensor] = None,
+):
+    """
+    Description:
+    ------------
+    This function maps token ids to gene names for attention weights.
+
+    Parameters:
+    -----------
+    outputs: `dict`
+        Dictionary containing outputs from the model.
+    src_mapping_dict: `Dict`
+        Dictionary mapping gene names to token ids.
+    time_step: `int`
+        Time step to compute cosine similarity.
+    token_ids: `torch.tensor`
+        Tensor of token ids from target tensor.
+    marker_genes: `List[str]`
+        List of marker genes.
+
+    Returns:
+    --------
+    attn_weights_res: `torch.tensor`
+    """
+
+    # filter for marker genes and swap key value
+    # if marker_genes is not None:
+    #     marker_genes_ids = {
+    #         v: k for v, k in tgt_mapping_dict.items() if v in marker_genes
+    #     }
+    # else:
+    # exclude special tokens from marker genes
+    special_tokens = ['<cls>', '<mask>', '<pad>', '<eos>']
+    special_tokens_ids = torch.tensor(
+        [tgt_mapping_dict[token] for token in special_tokens],
+        device=token_ids.device,
+    )
+    # map self attention weights
+    self_attn_weights = outputs['self_attn_weights'][time_step]
+    self_attn_weights = _map_attn_weights(
+        attn_weights=self_attn_weights,
+        tgt_mapping_dict=tgt_mapping_dict,
+        token_ids=token_ids,
+        special_tokens_ids=special_tokens_ids,
+    )
+    # map cross attention weights
+    cross_attn_weights = outputs['cross_attn_weights'][time_step]
+    cross_attn_weights = _map_attn_weights(
+        attn_weights=cross_attn_weights,
+        src_mapping_dict=src_mapping_dict,
+        tgt_mapping_dict=tgt_mapping_dict,
+        token_ids=token_ids,
+        special_tokens_ids=special_tokens_ids,
+        context_token_ids=context_token_ids,
+    )
+
+    return self_attn_weights
+
+
+def _map_attn_weights(
+    attn_weights: torch.tensor,
+    tgt_mapping_dict: Dict,
+    token_ids: torch.tensor,
+    special_tokens_ids: torch.tensor,
+    context_token_ids: Optional[torch.tensor] = None,
+    src_mapping_dict: Optional[Dict] = None,
+):
+    batch_size = attn_weights.shape[0]
+    # exclude cls token from gene embeddings
+    num_genes = len(tgt_mapping_dict.keys())
+    # print('src mapping dict', src_mapping_dict)
+    # if src_mapping_dict is not None:
+    #     shared_keys = set(src_mapping_dict.keys()).intersection(
+    #         set(tgt_mapping_dict.keys())
+    #     )
+    #     new_dict = {
+    #         src_mapping_dict[key]:
+    #         tgt_mapping_dict[key]
+    #         for key in shared_keys
+    #         }
+    #     print('map new', new_dict)
+    #     print(len(new_dict.keys()))
+    #     print(len(tgt_mapping_dict.keys()))
+    #     # add special tokens to new dictionary
+    #     new_dict.update(
+    #         {
+    #             src_mapping_dict[key]:
+    #             tgt_mapping_dict[key]
+    #             for key in special_tokens_ids
+    #             }
+    #     )
+    #     # remap token ids to new token ids for multidimensional tensor
+    #     src_token_ids = context_token_ids[0]
+    #     src_token_ids = torch.tensor(
+    #         [new_dict[int(token)] for token in src_token_ids.flatten()],
+    #         device=src_token_ids.device,
+    #     ).reshape(token_ids.shape)
+
+    #     print('context token ids', context_token_ids[0])
+    #     raise
+    attn_weights_res = torch.zeros(
+        size=(batch_size, num_genes, num_genes),
+        device=attn_weights.device,
+        dtype=attn_weights.dtype,
+    )
+    if context_token_ids is None:
+        context_token_ids = token_ids
+    for i in range(batch_size):
+        token_idx = token_ids[i]  # Shape (seq_len)
+        attn_weights_ = attn_weights[i]  # Shape (seq_len, seq_len)
+        # sort token indices
+        sorted_tokens, sorted_indices = torch.sort(token_idx)
+        # remove special tokens from sorted tokens and indices
+        sorted_tokens_ = sorted_tokens[~torch.isin(sorted_tokens, special_tokens_ids)]
+        sorted_indices_ = sorted_indices[~torch.isin(sorted_tokens, special_tokens_ids)]
+        sorted_attn_matrix = attn_weights_[sorted_indices_][:, sorted_indices_]
+        attn_weights_res[
+            i, sorted_tokens_.unsqueeze(1), sorted_tokens_.unsqueeze(0)
+        ] = sorted_attn_matrix
+    return attn_weights_res
 
 
 def return_gene_embeddings(
@@ -320,7 +446,7 @@ def return_gene_embeddings(
     gene_embeddings_res: `torch.tensor`
     """
     # filter for marker genes and swap key value
-    marker_genes_ids = {v: k for k, v in mapping_dict.items() if v in marker_genes}
+    marker_genes_ids = {v: k for v, k in mapping_dict.items() if v in marker_genes}
     gene_embeddings_res = torch.zeros(
         gene_embeddings.shape[0],
         len(marker_genes_ids.keys()),

@@ -87,6 +87,12 @@ def get_args():
         help='return embedding',
     )
     parser.add_argument(
+        '--return_attn',
+        type=str2bool,
+        default=False,
+        help='return attention',
+    )
+    parser.add_argument(
         '--ckpt_masking_path',
         type=str,
         default=None,
@@ -476,6 +482,7 @@ def main() -> None:
         test_kwargs['return_embeddings'] = args.return_embeddings
         test_kwargs['mapping_dict_path'] = args.mapping_dict_path
         test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
+        test_kwargs['return_attn'] = args.return_attn
         pretrained_module = CellGenTrainer(**test_kwargs)
     elif args.test_mode == 'count':
         test_kwargs['ckpt_masking_path'] = args.ckpt_masking_path
@@ -586,6 +593,7 @@ def main() -> None:
         callbacks=[TQDMProgressBar(refresh_rate=10)],
         accelerator=accelerator,
         devices=1 if torch.cuda.is_available() else 0,  # inference only on one gpu
+        limit_test_batches=10.0,
     )
     # Finally, kick of the training process.
     if args.test_mode == 'masking':

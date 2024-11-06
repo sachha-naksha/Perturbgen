@@ -24,13 +24,13 @@ echo "--- Start computing model"
 # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/plt/res"
 RES_NAME="hspc/embeddings/"
-# if directory does not exist, create it with the name $RES_NAME
-mkdir -p $RES_DIR/$RES_NAME
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# copy the current script to the result directory
-cp $0 $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh
-echo "Copying script to $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh"
+# # if directory does not exist, create it with the name $RES_NAME
+# mkdir -p $RES_DIR/$RES_NAME
+# # Get the current timestamp
+# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# # copy the current script to the result directory
+# cp $0 $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh
+# echo "Copying script to $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh"
 
 # # Run python script for rna
 # python3 $cwd/val.py \
@@ -39,8 +39,9 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --split False \
 --splitting_mode stratified \
 --return_embed True \
+--return_attn True \
 --generate False \
---ckpt_masking_path "./T_perturb/T_perturb/plt/res/hspc/embeddings/res/checkpoints/20241101_1632_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_psin_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt" \
+--ckpt_masking_path "./T_perturb/T_perturb/plt/res/hspc/embeddings/res/checkpoints/20241104_2209_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt" \
 --output_dir $RES_DIR/$RES_NAME/res \
 --src_dataset "./T_perturb/T_perturb/pp/res/hspc/dataset_hvg_src/stem.dataset" \
 --tgt_dataset_folder "./T_perturb/T_perturb/pp/res/hspc/dataset_hvg_tgt" \
@@ -59,8 +60,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --n_workers 8 \
 --pred_tps 1 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
---mode GF_frozen \
+--encoder GF_frozen \
 --context_mode True \
 --mask_scheduler 'cosine' \
---positional_encoding 'sin_learnt'
+--pos_encoding_mode 'time_pos_learnt'
 echo "--- Finished computing model"
