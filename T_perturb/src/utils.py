@@ -355,7 +355,7 @@ def return_attn_weights(
         context_token_ids=context_token_ids,
     )
 
-    return self_attn_weights
+    return self_attn_weights, cross_attn_weights
 
 
 def _map_attn_weights(
@@ -368,57 +368,74 @@ def _map_attn_weights(
 ):
     batch_size = attn_weights.shape[0]
     # exclude cls token from gene embeddings
-    num_genes = len(tgt_mapping_dict.keys())
-    # print('src mapping dict', src_mapping_dict)
-    # if src_mapping_dict is not None:
-    #     shared_keys = set(src_mapping_dict.keys()).intersection(
-    #         set(tgt_mapping_dict.keys())
-    #     )
-    #     new_dict = {
-    #         src_mapping_dict[key]:
-    #         tgt_mapping_dict[key]
-    #         for key in shared_keys
-    #         }
-    #     print('map new', new_dict)
-    #     print(len(new_dict.keys()))
-    #     print(len(tgt_mapping_dict.keys()))
-    #     # add special tokens to new dictionary
-    #     new_dict.update(
-    #         {
-    #             src_mapping_dict[key]:
-    #             tgt_mapping_dict[key]
-    #             for key in special_tokens_ids
-    #             }
-    #     )
-    #     # remap token ids to new token ids for multidimensional tensor
-    #     src_token_ids = context_token_ids[0]
-    #     src_token_ids = torch.tensor(
-    #         [new_dict[int(token)] for token in src_token_ids.flatten()],
-    #         device=src_token_ids.device,
-    #     ).reshape(token_ids.shape)
+    tgt_n_genes = len(tgt_mapping_dict.keys())
+    if (src_mapping_dict is not None) and (context_token_ids is not None):
+        # remap token ids to new token ids for multidimensional tensor
+        src_token_ids = context_token_ids[0]
+        src_token_ids = torch.tensor(
+            [src_mapping_dict[int(token)] for token in src_token_ids.flatten()],
+            device=src_token_ids.device,
+        ).reshape(token_ids.shape)
+        context_token_ids[0] = src_token_ids
+        context_n_genes = len(context_token_ids) * len(src_mapping_dict.keys())
+    else:
+        context_n_genes = tgt_n_genes
 
-    #     print('context token ids', context_token_ids[0])
-    #     raise
     attn_weights_res = torch.zeros(
-        size=(batch_size, num_genes, num_genes),
+        size=(batch_size, tgt_n_genes, context_n_genes),
         device=attn_weights.device,
         dtype=attn_weights.dtype,
     )
-    if context_token_ids is None:
-        context_token_ids = token_ids
+
     for i in range(batch_size):
         token_idx = token_ids[i]  # Shape (seq_len)
         attn_weights_ = attn_weights[i]  # Shape (seq_len, seq_len)
         # sort token indices
-        sorted_tokens, sorted_indices = torch.sort(token_idx)
-        # remove special tokens from sorted tokens and indices
-        sorted_tokens_ = sorted_tokens[~torch.isin(sorted_tokens, special_tokens_ids)]
-        sorted_indices_ = sorted_indices[~torch.isin(sorted_tokens, special_tokens_ids)]
-        sorted_attn_matrix = attn_weights_[sorted_indices_][:, sorted_indices_]
-        attn_weights_res[
-            i, sorted_tokens_.unsqueeze(1), sorted_tokens_.unsqueeze(0)
-        ] = sorted_attn_matrix
-    return attn_weights_res
+        if context_token_ids is None:
+            sorted_tokens, sorted_indices = torch.sort(token_idx)
+            # remove special tokens from sorted tokens and indices
+            sorted_tokens_ = sorted_tokens[
+                ~torch.isin(sorted_tokens, special_tokens_ids)
+            ]
+            sorted_indices_ = sorted_indices[
+                ~torch.isin(sorted_tokens, special_tokens_ids)
+            ]
+            sorted_attn_matrix = attn_weights_[sorted_indices_][:, sorted_indices_]
+            attn_weights_res = attn_weights_res.clone()
+            attn_weights_res[
+                i, sorted_tokens_.unsqueeze(1), sorted_tokens_.unsqueeze(0)
+            ] = sorted_attn_matrix
+        else:
+            sorted_tgt_tokens, sorted_tgt_indices = torch.sort(token_idx)
+            sorted_tgt_tokens_ = sorted_tgt_tokens[
+                ~torch.isin(sorted_tgt_tokens, special_tokens_ids)
+            ]
+            sorted_tgt_indices_ = sorted_tgt_indices[
+                ~torch.isin(sorted_tgt_tokens, special_tokens_ids)
+            ]
+            src_seq_len = 0
+            for context_token in context_token_ids:
+                context_token_idx = context_token[i]
+                sorted_context_tokens, sorted_context_indices = torch.sort(
+                    context_token_idx
+                )
+                sorted_context_tokens_ = sorted_context_tokens[
+                    ~torch.isin(sorted_context_tokens, special_tokens_ids)
+                ]
+                sorted_context_indices_ = sorted_context_indices[
+                    ~torch.isin(sorted_context_tokens, special_tokens_ids)
+                ]
+                sorted_attn_matrix = attn_weights_[sorted_tgt_indices_][
+                    :, src_seq_len + sorted_context_indices_
+                ]
+                # adjust context token indices by src_seq_len
+                src_seq_len += len(context_token_idx)
+                attn_weights_res[
+                    i,
+                    sorted_tgt_tokens_.unsqueeze(1),
+                    sorted_context_tokens_.unsqueeze(0) + src_seq_len,
+                ] = sorted_attn_matrix
+        return attn_weights_res
 
 
 def return_gene_embeddings(

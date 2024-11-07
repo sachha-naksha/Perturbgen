@@ -90,6 +90,13 @@ def get_args():
         help='Cell pairing mode',
     )
     parser.add_argument(
+        '--pairing_obs',
+        type=str,
+        default='diff_state',
+        help='Observation to use for cell pairing'
+        'and encoding the different states (e.g. time, hierarchy).',
+    )
+    parser.add_argument(
         '--nproc',
         type=int,
         default=8,
@@ -132,6 +139,13 @@ def get_args():
         choices=['Geneformer', 'Transformer'],
         help='Mode for tokenisation',
     )
+    parser.add_argument(
+        '--n_hvg',
+        type=int,
+        default=5000,
+        help='Number of highly variable genes to keep',
+    )
+
     args = parser.parse_args()
     return args
 
@@ -160,7 +174,9 @@ if args.gene_filtering_mode == 'hvg':
         adata.X = adata.layers['counts'].copy()
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
-    sc.pp.highly_variable_genes(adata, n_top_genes=2000)
+    sc.pp.highly_variable_genes(
+        adata, n_top_genes=args.n_hvg, batch_key=args.pairing_obs
+    )
     adata = adata[:, adata.var['highly_variable']].copy()
     adata.X = adata.layers['counts']  # need raw counts
 elif args.gene_filtering_mode == 'degs':
@@ -219,7 +235,8 @@ with open(
 # make new directory to store h5ad files
 paired_h5ad_dir = (
     f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-    f'/h5ad_pairing_{args.gene_filtering_mode}'
+    f'/h5ad_pairing_{args.n_hvg}_'
+    f'{args.gene_filtering_mode}'
 )
 if not os.path.exists(paired_h5ad_dir):
     os.makedirs(paired_h5ad_dir)
@@ -269,27 +286,28 @@ adata = sc.read_h5ad(
 # save row id to gene name mapping
 with open(
     f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-    f'/token_id_to_genename_{args.gene_filtering_mode}.pkl',
+    f'/token_id_to_genename_{args.n_hvg}_'
+    f'{args.gene_filtering_mode}.pkl',
     'wb',
 ) as file:
     pickle.dump(row_id_to_gene_name, file)
-# create separate directory only for tokenisation
-output_tmp_dir = (
-    f'./T_perturb/T_perturb/pp/res/{args.dataset}' f'/h5ad_{args.gene_filtering_mode}'
-)
-if not os.path.exists(output_tmp_dir):
-    os.makedirs(output_tmp_dir)
+# save token id to row id mapping
+with open(
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
+    f'tokenid_to_rowid_{args.n_hvg}_'
+    f'{args.gene_filtering_mode}.pkl',
+    'wb',
+) as file:
+    pickle.dump(token_id_to_row_id_dict, file)
 
-adata_subset.write_h5ad(
-    f'{paired_h5ad_dir}/{args.dataset}_{args.gene_filtering_mode}.h5ad'
-)
+adata_subset.write_h5ad(f'{paired_h5ad_dir}/{args.datasexst}.h5ad')
 print('Finished preprocessing adata.')
 print('Start tokenisation of adata...')
 input_dir = paired_h5ad_dir
 
 output_dir = (
     f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-    f'/dataset_{args.gene_filtering_mode}'
+    f'/dataset_{args.n_hvg}_{args.gene_filtering_mode}'
 )
 var_to_keep: Dict[str, str] = {v: v for v in args.var_list}.copy()
 # add cell_pairing_index to var_to_keep
@@ -307,7 +325,7 @@ tk = TranscriptomeTokenizer(
 )
 # time it
 # Proceed with your main logic
-file_name = f'{args.dataset}_{args.gene_filtering_mode}'
+file_name = args.dataset
 tk.tokenize_data(
     data_directory=paired_h5ad_dir,
     output_directory=output_dir,
@@ -331,13 +349,14 @@ adata_subset = sc.read_h5ad(
 cell_pairings = pairing_src_to_tgt_cells(
     adata_subset=adata_subset,
     pairing_mode=args.pairing_mode,
-    pairing_obs='diff_state',
+    pairing_obs=args.pairing_obs,
     seed_no=seed_no,
     mapping_df=mapping_df,
 )
 
 paired_dataset_dir = (
-    f'./T_perturb/T_perturb/res/{args.dataset}/' f'dataset_{args.gene_filtering_mode}'
+    f'./T_perturb/T_perturb/res/{args.dataset}/'
+    f'dataset_{args.n_hvg}_{args.gene_filtering_mode}'
 )
 # token_id_to_row_id_dict = pickle.load(
 #     open(

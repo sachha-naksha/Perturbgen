@@ -132,26 +132,15 @@ class CellGenTrainer(LightningModule):
                 mapping_dict_path,
                 'rb',
             ) as f:
-                gene_to_tokenid = pickle.load(f)
+                gene_to_rowid = pickle.load(f)
         with open(
-            './T_perturb/Geneformer/geneformer/ensembl_mapping_dict_gc95M.pkl',
+            './T_perturb/T_perturb/pp/res/hspc/tokenid_to_rowid_hvg.pkl',
             'rb',
         ) as f:
-            all_gene_to_ensemblid = pickle.load(f)
-            print('all_gene_to_ensemblid', all_gene_to_ensemblid)
-            raise
-        with open(
-            './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
-            'rb',
-        ) as f:
-            ensemblid_to_tokenid = pickle.load(f)
-        self.all_gene_to_tokenid = {
-            k: ensemblid_to_tokenid[v]
-            for k, v in all_gene_to_ensemblid.items()
-            if v in ensemblid_to_tokenid
-        }
+            tokenid_to_rowid = pickle.load(f)
+        self.tokenid_to_rowid = tokenid_to_rowid
         # swarp key and value
-        self.gene_to_tokenid = {v: k for k, v in gene_to_tokenid.items()}
+        self.gene_to_rowid = {v: k for k, v in gene_to_rowid.items()}
         self.return_embeddings = return_embeddings
         self.generate = generate
         self.tgt_vocab_size = tgt_vocab_size
@@ -159,6 +148,8 @@ class CellGenTrainer(LightningModule):
         self.context_mode = context_mode
 
         self.test_dict: Dict[str, List[Any]] = {
+            'self_attn_weights': [],
+            'cross_attn_weights': [],
             'true_counts': [],
             'cls_embeddings': [],
             'cosine_similarities': [],
@@ -337,40 +328,47 @@ class CellGenTrainer(LightningModule):
 
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
                     cos_similarity=cos_similarity,
-                    mapping_dict=self.gene_to_tokenid,
+                    mapping_dict=self.gene_to_rowid,
                     token_ids=token_ids,
                 )
                 # marker_gene_embeddings = return_gene_embeddings(
                 #     marker_genes=marker_genes,
                 #     gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],,
-                #     mapping_dict=self.gene_to_tokenid,
+                #     mapping_dict=self.gene_to_rowid,
                 #     token_ids=token_ids,
                 # )
                 self_attn_weights, cross_attn_weights = return_attn_weights(
                     outputs=outputs,
-                    tgt_mapping_dict=self.gene_to_tokenid,
-                    src_mapping_dict=self.all_gene_to_tokenid,
+                    tgt_mapping_dict=self.gene_to_rowid,
+                    src_mapping_dict=self.tokenid_to_rowid,
                     time_step=t,
                     token_ids=token_ids,
                     context_token_ids=context_ids,
                 )
+
                 self.marker_genes = marker_genes_dict
+
                 true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
                 cls_embeddings = outputs['mean_embedding'][t].detach().cpu()
                 cos_similarity = marker_cos_similarity.detach().cpu()
                 # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
+                self_attn_weights = self_attn_weights.detach().cpu()
+                cross_attn_weights = cross_attn_weights.detach().cpu()
                 self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
                 self.test_dict['cosine_similarities'].append(cos_similarity)
                 # self.test_dict['gene_embeddings'].append(gene_embeddings)
                 self.test_dict['batch'].append(combined_batch)
+                self.test_dict['self_attn_weights'].append(self_attn_weights)
+                self.test_dict['cross_attn_weights'].append(cross_attn_weights)
                 self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
                 if len(self.var_list) > 0:
                     for var in self.var_list:
                         self.test_dict[var].append(batch[f'{var}_t{t}'])
 
     def on_test_epoch_end(self):
+        # self_attn_weights = torch.cat(self.test_dict['self_attn_weights'])
         if self.return_embeddings:
             obs_key = self.var_list if len(self.var_list) > 0 else []
             obs_key.extend(['batch', 'cell_idx'])

@@ -321,6 +321,8 @@ class CrossAttention(nn.Module):
         v = self.to_v(context)
         if self.return_attn:
             identity = torch.eye(k.size(1), device=k.device)
+        else:
+            identity = None
         if attention_mode == 'normal':
             out, attn = self.normal_attention(
                 q, k, v, h, mask, return_attn=self.return_attn
