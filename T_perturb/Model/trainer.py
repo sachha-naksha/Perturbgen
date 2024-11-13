@@ -18,7 +18,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from deepspeed.ops.adam import FusedAdam
 
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
 from pytorch_lightning import LightningModule
@@ -34,13 +33,14 @@ from T_perturb.src.metric import (
     evaluate_mmd,
     lin_reg_summary,
 )
-from T_perturb.src.utils import (  # WarmupScheduler,; return_gene_embeddings,
+from T_perturb.src.utils import (  # WarmupScheduler,;
     aggregate_attn_weights,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
     return_attn_weights,
     return_cos_similarity,
+    return_gene_embeddings,
     return_generation_adata,
     return_prediction_adata,
     scale_pca,
@@ -155,10 +155,11 @@ class CellGenTrainer(LightningModule):
             'cosine_similarities': [],
             'batch': [],
             'cell_idx': [],
-            'gene_embeddings': [],
         }
-        if return_attn:
-            for t in range(1, n_total_tps + 1):
+
+        for t in range(1, n_total_tps + 1):
+            self.test_dict[f'gene_embeddings_t{t}'] = []
+            if return_attn:
                 self.test_dict[f'self_attn_weights_t{t}'] = []
                 self.test_dict[f'cross_attn_weights_t{t}'] = []
         if var_list is not None:
@@ -230,10 +231,13 @@ class CellGenTrainer(LightningModule):
         #     initial_lr=self.initial_lr,
         #     end_lr=self.end_lr,
         # )
+        from deepspeed.ops.adam import FusedAdam
+
         optimizer = FusedAdam(
             self.transformer.parameters(),
             lr=self.initial_lr,
             weight_decay=self.weight_decay,
+            adam_w_mode=False,
         )
         return {
             'optimizer': optimizer,
@@ -329,28 +333,31 @@ class CellGenTrainer(LightningModule):
 
             for t in self.pred_tps:
                 token_ids = self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
-                context_tps = [tp for tp in self.context_tps if tp != t]
-                # extract context_ids
-                context_ids = [batch['src_input_ids']]
-                context_ids.extend(
-                    [self.tgt_input_id_dict[f'tgt_input_ids_t{t}'] for t in context_tps]
-                )
                 # 1. compute cosine similarity
                 cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
                 # 2. map cosine similarity to corresponding genes
-
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
                     cos_similarity=cos_similarity,
                     mapping_dict=self.gene_to_rowid,
                     token_ids=token_ids,
                 )
-                # marker_gene_embeddings = return_gene_embeddings(
-                #     marker_genes=marker_genes,
-                #     gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],,
-                #     mapping_dict=self.gene_to_rowid,
-                #     token_ids=token_ids,
-                # )
+                # take the non zero mean of the gene embeddings
+                gene_embeddings = return_gene_embeddings(
+                    # marker_genes=marker_genes,
+                    gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],
+                    mapping_dict=self.gene_to_rowid,
+                    token_ids=token_ids,
+                )
                 if self.return_attn:
+                    context_tps = [tp for tp in self.context_tps if tp != t]
+                    # extract context_ids
+                    context_ids = [batch['src_input_ids']]
+                    context_ids.extend(
+                        [
+                            self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
+                            for t in context_tps
+                        ]
+                    )
                     self_attn_weights, cross_attn_weights = return_attn_weights(
                         outputs=outputs,
                         tgt_mapping_dict=self.gene_to_rowid,
@@ -366,12 +373,13 @@ class CellGenTrainer(LightningModule):
                     self.test_dict[f'cross_attn_weights_t{t}'].append(
                         cross_attn_weights
                     )
-                    self.test_dict[f'self_attn_weights_t{t}'].append(self_attn_weights)
-                    self.test_dict[f'cross_attn_weights_t{t}'].append(
-                        cross_attn_weights
-                    )
                 self.marker_genes = marker_genes_dict
-
+                # non-zero mean aggregation of gene embeddings to reduce size
+                gene_embeddings[gene_embeddings == 0] = float(
+                    'nan'
+                )  # Convert zeros to NaN
+                gene_embeddings_mean = torch.nanmean(gene_embeddings, dim=0)
+                gene_embeddings_mean = gene_embeddings_mean.detach().cpu()
                 true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
                 cls_embeddings = outputs['mean_embedding'][t].detach().cpu()
                 cos_similarity = marker_cos_similarity.detach().cpu()
@@ -379,6 +387,7 @@ class CellGenTrainer(LightningModule):
                 combined_batch = batch['combined_batch'].detach().cpu()
                 self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
+                self.test_dict[f'gene_embeddings_t{t}'].append(gene_embeddings_mean)
                 self.test_dict['cosine_similarities'].append(cos_similarity)
                 # self.test_dict['gene_embeddings'].append(gene_embeddings)
                 self.test_dict['batch'].append(combined_batch)
@@ -423,6 +432,7 @@ class CellGenTrainer(LightningModule):
                 gene_names=self.gene_names,
                 output_dir=self.output_dir,
                 file_name=f'{self.date}_prediction_embeddings.h5ad',
+                n_total_tps=self.n_total_tps,
             )
 
 

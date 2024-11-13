@@ -9,6 +9,8 @@ import pytorch_lightning as pl
 import scanpy as sc
 import torch
 from datasets import load_from_disk
+
+# from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DeepSpeedStrategy  # , DDPStrategy,
@@ -22,6 +24,11 @@ from T_perturb.src.utils import (
     str2bool,
     stratified_split,
 )
+
+# from pytorch_lightning.utilities.deepspeed import (
+#     convert_zero_checkpoint_to_fp32_state_dict,
+# )
+
 
 if os.getcwd().split('/')[-1] != 't_generative':
     # set working directory to root of repository
@@ -469,27 +476,19 @@ def main() -> None:
         dirpath=checkpoint_path,
         filename=f'{filename}-' + '{epoch:02d}',
         save_top_k=-1,
-        every_n_epochs=10,
+        every_n_epochs=1,
         verbose=True,
         monitor=monitor_metric,
         mode=mode,
     )
     # The tensorboard logger allows for monitoring the progress of training
-    if torch.cuda.device_count() > 1:
-        # multi gpu training with group logging
-        wandb_logger = WandbLogger(
-            project='ttransformer',
-            name=f'{run_id}_{str(uuid.uuid4())[:6]}',
-            save_dir=args.log_dir,
-            log_model=True,
-        )  # noqa
-    else:
-        wandb_logger = WandbLogger(
-            project='ttransformer',
-            name=f'{run_id}',
-            save_dir=args.log_dir,
-            log_model=True,
-        )  # noqa
+    # Configure WandbLogger with unique name for each run
+    run_name = (
+        f'{run_id}_{str(uuid.uuid4())[:6]}' if torch.cuda.device_count() > 1 else run_id
+    )
+    wandb_logger = WandbLogger(
+        project='ttransformer', name=run_name, save_dir=args.log_dir, log_model=True
+    )
 
     # In this simple example we just check if a GPU is available.
     # For training larger models in a distributed settings, this needs more care.
@@ -511,32 +510,78 @@ def main() -> None:
     print('Using device {}.'.format(accelerator))
     deepspeed_strategy = DeepSpeedStrategy(
         stage=2,
-        offload_optimizer=True,
-        offload_parameters=True,
+        # offload_optimizer=True,
+        # offload_parameters=True,
     )
-    if torch.cuda.is_available():
-        cuda_device_name = torch.cuda.get_device_name()
-    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
-        print(f'Using {cuda_device_name} for training')
-        precision = 'bf16-mixed'
-    else:
-        precision = '16-mixed'
 
+    # if torch.cuda.is_available():
+    #     cuda_device_name = torch.cuda.get_device_name()
+    # if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+    #     print(f'Using {cuda_device_name} for training')
+    #     precision = 'bf16-mixed'
+    # else:
+    #     precision = '16-mixed'
+    # After each epoch, convert DeepSpeed checkpoint to FP32 and save
+    # class DeepSpeedCheckpointConverter(Callback):
+    #     def __init__(self, checkpoint_path, filename, save_interval=5):
+    #         super().__init__()
+    #         self.checkpoint_path = checkpoint_path
+    #         print(f'Checkpoint path: {checkpoint_path}')
+    #         self.filename = filename
+    #         print(f'Filename: {filename}')
+    #         self.save_interval = save_interval
+
+    #     def on_train_epoch_end(self, trainer, pl_module):
+    #         # Only save at specified intervals
+    #         if trainer.current_epoch % self.save_interval == 0:
+    #             # Try accessing DeepSpeed through pl_module
+    #             deepspeed_engine = getattr(pl_module, 'deepspeed', None)
+
+    #             if isinstance(trainer.strategy, DeepSpeedStrategy):
+    #                 # Define DeepSpeed checkpoint path
+    #                 deepspeed_epoch_checkpoint_path = os.path.join(
+    #                     self.checkpoint_path, f'epoch_{trainer.current_epoch:02d}'
+    #                 )
+
+    #                 # Save the checkpoint using DeepSpeed’s save_checkpoint method
+    #                 deepspeed_engine.save_checkpoint(deepspeed_epoch_checkpoint_path)
+    #                 print(
+    #                     f'DeepSpeed checkpoint saved at'
+    #                     f'{deepspeed_epoch_checkpoint_path}'
+    #                 )
+
+    #                 # Convert the DeepSpeed checkpoint to FP32 format
+    #                 fp32_state_dict = os.path.join(
+    #                     self.checkpoint_path,
+    #                     f'{self.filename}-epoch={trainer.current_epoch:02d}-fp32.pth',
+    #                 )
+    #                 convert_zero_checkpoint_to_fp32_state_dict(
+    #                     zero_checkpoint_path=deepspeed_epoch_checkpoint_path,
+    #                     output_path=fp32_state_dict,
+    #                 )
+    #                 print(f'FP32 checkpoint saved at {fp32_state_dict}')
+    #             else:
+    #                 print('DeepSpeed not initialized in pl_module')
+
+    # deepspeed_convert_ckpt = DeepSpeedCheckpointConverter(
+    #     checkpoint_path=checkpoint_path, filename=filename
+    # )
     # If the device is an A100, set the precision for matrix multiplication
     # ddp_strategy = DDPStrategy(find_unused_parameters=True)
     trainer = pl.Trainer(
         logger=wandb_logger,
         callbacks=[
             TQDMProgressBar(refresh_rate=10),
-            checkpoint_callback,
             early_stop_callback,
+            checkpoint_callback,
         ],
         max_epochs=args.epochs,
-        accelerator='auto',
-        precision=precision,
+        accelerator=accelerator,
+        # precision=precision,
         devices=-1 if torch.cuda.is_available() else 0,
         strategy=deepspeed_strategy if torch.cuda.device_count() > 1 else 'auto',
     )
+    # trainer.strategy.config["zero_force_ds_cpu_optimizer"] = False
     print('Starting training...')
 
     if args.train_mode == 'masking':
@@ -547,12 +592,20 @@ def main() -> None:
     else:
         raise ValueError('train_mode not recognised, needs to be masking or count')
 
-    # #collate deepzero checkpoint
+    # # #collate deepzero checkpoint
     # if torch.cuda.device_count() > 1:
-    #     save_path = f'./Model/checkpoints/{filename}'
+    #     checkpoint_path = os.path.join(
+    #         checkpoint_path,
+    #         f'{filename}-epoch={trainer.current_epoch}.ckpt'
+    #     )
+    #     print(f'Saving checkpoint to {checkpoint_path}')
+    # # check if checkpoint path exists
+    # if os.path.exists(checkpoint_path):
+
     #     convert_zero_checkpoint_to_fp32_state_dict(
-    #         save_path,
-    #         f'{save_path}.pt'
+    #         zero_checkpoint_path=checkpoint_path,
+    #         output_path=checkpoint_path,
+    #         tag='fp32'
     #     )
 
 

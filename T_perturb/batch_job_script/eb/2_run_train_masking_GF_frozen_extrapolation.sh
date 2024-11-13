@@ -1,7 +1,7 @@
 #make a date directory if it does not exist
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-cellgeni-a100)
-#BSUB -gpu 'mode=exclusive_process:num=2' # request for exclusive access to gpu
+#BSUB -gpu 'mode=exclusive_process:num=4' # request for exclusive access to gpu
 #BSUB -n 16 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory

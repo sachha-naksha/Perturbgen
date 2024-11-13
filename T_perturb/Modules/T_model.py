@@ -288,7 +288,7 @@ class CrossAttention(nn.Module):
             mask = ~mask
         if return_attn & (identity is not None):
             identity = identity.expand(q.size(0), self.num_heads, -1, -1)
-        # with autocast(device_type='cuda'):
+
         with sdpa_kernel(
             backends=[SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
         ):

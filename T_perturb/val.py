@@ -485,6 +485,7 @@ def main() -> None:
         test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
         test_kwargs['return_attn'] = args.return_attn
         pretrained_module = CellGenTrainer(**test_kwargs)
+
     elif args.test_mode == 'count':
         test_kwargs['ckpt_masking_path'] = args.ckpt_masking_path
         test_kwargs['ckpt_count_path'] = args.ckpt_count_path
