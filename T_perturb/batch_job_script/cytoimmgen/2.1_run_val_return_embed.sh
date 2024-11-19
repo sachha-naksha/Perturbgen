@@ -24,13 +24,13 @@ echo "--- Start computing model"
 # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/T_perturb/T_perturb/iclr"
 RES_NAME="cytoimmgen/gene_embeddings/"
-# if directory does not exist, create it with the name $RES_NAME
-mkdir -p $RES_DIR/$RES_NAME
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-# copy the current script to the result directory
-cp $0 $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh
-echo "Copying script to $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh"
+# # if directory does not exist, create it with the name $RES_NAME
+# mkdir -p $RES_DIR/$RES_NAME
+# # Get the current timestamp
+# TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+# # copy the current script to the result directory
+# cp $0 $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh
+# echo "Copying script to $RES_DIR/$RES_NAME/2.1_run_val_return_embed.sh_$TIMESTAMP.sh"
 
 # # Run python script for rna
 # python3 $cwd/val.py \

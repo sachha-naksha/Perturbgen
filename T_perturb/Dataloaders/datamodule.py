@@ -126,6 +126,7 @@ class CellGenDataModule(LightningDataModule):
             'batch_size': batch_size,
             'shuffle': shuffle,
             'num_workers': num_workers,
+            'pin_memory': True,
         }
         token_dictionary_file = TOKEN_DICTIONARY_FILE
         with open(token_dictionary_file, 'rb') as f:

@@ -333,11 +333,28 @@ class CellGenTrainer(LightningModule):
                 token_ids = self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
                 # 1. compute cosine similarity
                 cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
+                # load marker genes
+                with open(
+                    './T_perturb/T_perturb/plt/res/hspc/embeddings/'
+                    'res/cos_sim/top_genes_celltype_v2_10k.pkl',
+                    'rb',
+                ) as f:
+                    marker_genes = pickle.load(f)
+                # select keys MEMP, GMP and LMPP
+                marker_genes_ = {
+                    key: marker_genes[key] for key in ['MEMP', 'GMP', 'LMPP']
+                }
+                # concatenate all marker genes which are in a list
+                marker_genes_all = [
+                    gene for genes in marker_genes_.values() for gene in genes
+                ]
+                marker_genes_all = list(set(marker_genes_all))
                 # 2. map cosine similarity to corresponding genes
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
                     cos_similarity=cos_similarity,
                     mapping_dict=self.gene_to_rowid,
                     token_ids=token_ids,
+                    marker_genes=marker_genes_all,
                 )
                 # take the non zero mean of the gene embeddings
                 gene_embeddings = return_gene_embeddings(
@@ -345,6 +362,7 @@ class CellGenTrainer(LightningModule):
                     gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],
                     mapping_dict=self.gene_to_rowid,
                     token_ids=token_ids,
+                    marker_genes=marker_genes_all,
                 )
                 if self.return_attn:
                     context_tps = [tp for tp in self.context_tps if tp != t]
@@ -372,20 +390,17 @@ class CellGenTrainer(LightningModule):
                         cross_attn_weights
                     )
                 self.marker_genes = marker_genes_dict
-                # non-zero mean aggregation of gene embeddings to reduce size
-                gene_embeddings[gene_embeddings == 0] = float(
-                    'nan'
-                )  # Convert zeros to NaN
-                gene_embeddings_mean = torch.nanmean(gene_embeddings, dim=0)
-                gene_embeddings_mean = gene_embeddings_mean.detach().cpu()
+                cos_similarity = marker_cos_similarity.detach().cpu()
+                cos_similarity = cos_similarity.to(torch.float16)
+                gene_embeddings = gene_embeddings.detach().cpu()
+                gene_embeddings = gene_embeddings.to(torch.float16)
                 true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
                 cls_embeddings = outputs['mean_embedding'][t].detach().cpu()
-                cos_similarity = marker_cos_similarity.detach().cpu()
                 # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
                 self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
-                self.test_dict[f'gene_embeddings_t{t}'].append(gene_embeddings_mean)
+                self.test_dict[f'gene_embeddings_t{t}'].append(gene_embeddings)
                 self.test_dict['cosine_similarities'].append(cos_similarity)
                 # self.test_dict['gene_embeddings'].append(gene_embeddings)
                 self.test_dict['batch'].append(combined_batch)
@@ -403,7 +418,7 @@ class CellGenTrainer(LightningModule):
                 cross_attn_weights = torch.stack(
                     self.test_dict[f'cross_attn_weights_t{t}']
                 )
-                # order genes based on ascending order of rowid
+                # order genes based on ascending order of  rowid
                 tgt_gene_order = sorted(self.gene_to_rowid, key=self.gene_to_rowid.get)
                 aggregate_attn_weights(
                     attn_weights=self_attn_weights,
@@ -429,7 +444,7 @@ class CellGenTrainer(LightningModule):
                 marker_genes=self.marker_genes,
                 gene_names=self.gene_names,
                 output_dir=self.output_dir,
-                file_name=f'{self.date}_prediction_embeddings.h5ad',
+                file_name=f'{self.date}_prediction_embeddings',
                 n_total_tps=self.n_total_tps,
             )
 

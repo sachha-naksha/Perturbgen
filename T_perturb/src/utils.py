@@ -539,6 +539,7 @@ def return_gene_embeddings(
         len(marker_genes_ids.keys()),
         gene_embeddings.shape[2],
         device=gene_embeddings.device,
+        dtype=gene_embeddings.dtype,
     )
     marker_genes_dict = {}
     for i, gene in enumerate(marker_genes_ids.keys()):
@@ -612,11 +613,13 @@ def return_prediction_adata(
         test_var = pd.DataFrame(gene_names, columns=['gene_name'])
     gene_embeddings_dict = {}
     for t in range(1, n_total_tps + 1):
-        gene_embeddings = torch.stack(test_dict[f'gene_embeddings_t{t}']).numpy()
-        # compute non-zero mean for gene embeddings
-        gene_embeddings[gene_embeddings == 0] = np.nan
-        gene_embeddings = np.nanmean(gene_embeddings, axis=0)
+        gene_embeddings = torch.cat(test_dict[f'gene_embeddings_t{t}'], dim=0).numpy()
         gene_embeddings_dict[f'gene_embeddings_t{t}'] = gene_embeddings
+
+    # save as pkl file for downstream analysis
+    with open(os.path.join(output_dir, f'{file_name}_gene_embeddings.pkl'), 'wb') as f:
+        pickle.dump(gene_embeddings_dict, f)
+    del gene_embeddings_dict
 
     adata = ad.AnnData(
         X=true_counts,
@@ -625,7 +628,6 @@ def return_prediction_adata(
         obsm={
             'cls_embeddings': cls_embeddings,
         },
-        varm=gene_embeddings_dict,
         uns={
             'marker_genes': marker_genes,
         },
@@ -633,7 +635,7 @@ def return_prediction_adata(
     if gene_names is not None:
         adata.var_names = adata.var['gene_name']
         adata.var = adata.var.drop(columns=['gene_name'])
-    adata.write_h5ad(os.path.join(output_dir, 'f{file_name}.h5ad'))
+    adata.write_h5ad(os.path.join(output_dir, f'{file_name}.h5ad'))
     # save cosine similarity separately due to large size
     cos_similarity = torch.cat(test_dict['cosine_similarities'], dim=0).numpy()
     cos_similarity_df = pd.DataFrame(cos_similarity, columns=marker_genes.keys())
@@ -645,7 +647,6 @@ def return_prediction_adata(
         os.path.join(output_dir, f'{file_name}_cosine_similarity.csv')
     )
     # adata.obsm['cosine_similarity'] = cos_similarity_df
-
     print('End saving embeddings---')
 
 
