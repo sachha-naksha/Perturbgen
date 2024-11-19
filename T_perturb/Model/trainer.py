@@ -221,10 +221,12 @@ class CellGenTrainer(LightningModule):
     def configure_optimizers(self):
         parameters = [{'params': self.transformer.parameters(), 'lr': self.initial_lr}]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
+
         # number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
         # total_steps = self.num_epochs * number_of_batches_per_epoch
         # warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
         # scheduler = WarmupScheduler(
+
         #     optimizer,
         #     warmup_steps=warmup_steps,
         #     initial_lr=self.initial_lr,
