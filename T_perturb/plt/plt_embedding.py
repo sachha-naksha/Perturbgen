@@ -9,7 +9,7 @@ import scanpy as sc
 import seaborn as sns
 from matplotlib import style
 
-from T_perturb.Model.metric import (
+from T_perturb.T_perturb.src.metric import (
     evaluate_emd,
     evaluate_mmd,
     lin_reg_summary,

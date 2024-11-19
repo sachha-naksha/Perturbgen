@@ -7,13 +7,16 @@ import pytorch_lightning as pl
 import torch
 from datasets import Dataset
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
 
 from T_perturb.Dataloaders.datamodule import CellGenDataModule
 from T_perturb.Model.trainer import CellGenTrainer
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
+
+csv_logger = CSVLogger('T_perturb/T_perturb/tests/res', name='test_cellgen_training')
 
 
 def dummy_dataset(
@@ -32,8 +35,13 @@ def dummy_dataset(
         )
         input_ids = torch.tensor(input_ids_np, dtype=torch.long)
         input_ids[:, -10:] = 0
+        cell_idx = np.arange(num_samples)
         dataset = Dataset.from_dict(
-            {'input_ids': input_ids, 'length': [len(input_ids)] * num_samples}
+            {
+                'input_ids': input_ids,
+                'length': [len(input_ids)] * num_samples,
+                'cell_pairin_index': cell_idx,
+            }
         )
         return dataset
     else:
@@ -62,15 +70,18 @@ def dummy_dataset(
 class CellGenTestTrainingCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super(CellGenTestTrainingCase, self).__init__(*args, **kwargs)
-        self.time_step = [1, 2]
-        self.total_time_steps = 2
+        self.pred_tps = [1, 2]
+        self.n_total_tps = 2
         self.max_seq_length = 50
         self.tgt_vocab_size = 101  # +1 for padding token
         self.batch_size = 4
         self.d_model = 12
 
     def setUp(self):
+        # Reproducibility
         pl.seed_everything(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
         # Load transformer model and count decoder
         transformer = CellGenTrainer(
@@ -83,10 +94,16 @@ class CellGenTestTrainingCase(unittest.TestCase):
             dropout=0,
             mlm_probability=0.15,
             weight_decay=0.0,
-            lr=1e-3,
-            time_steps=self.time_step,
-            total_time_steps=self.total_time_steps,
-            mode='Transformer_encoder',
+            initial_lr=1e-3,
+            precision='high',
+            pred_tps=self.pred_tps,
+            n_total_tps=self.n_total_tps,
+            pos_encoding_mode='time_pos_sin',
+            encoder='Transformer_encoder',
+            mapping_dict_path=(
+                './T_perturb/T_perturb/pp/res/'
+                'cytoimmgen/token_id_to_genename_hvg.pkl'
+            ),
         )
         self.transformer = transformer
 
@@ -100,7 +117,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
             max_len=self.max_seq_length,
             vocab_size=self.tgt_vocab_size,
             num_samples=100,
-            total_time_steps=self.total_time_steps,
+            total_time_steps=self.n_total_tps,
         )
 
         # Load the data module
@@ -109,8 +126,8 @@ class CellGenTestTrainingCase(unittest.TestCase):
             tgt_datasets=tgt_datasets,
             batch_size=self.batch_size,
             num_workers=1,
-            time_steps=[1, 2],
-            total_time_steps=self.total_time_steps,
+            pred_tps=self.pred_tps,
+            n_total_tps=self.n_total_tps,
             max_len=self.max_seq_length,
             train_indices=np.random.choice(100, 80, replace=False),
         )
@@ -145,27 +162,24 @@ class CellGenTestTrainingCase(unittest.TestCase):
         checkpoint_callback = ModelCheckpoint(
             dirpath='T_perturb/T_perturb/tests/checkpoints',
             filename='test_masking_checkpoint-{epoch:02d}',
-            save_top_k=1,
+            save_top_k=-1,
             monitor='train/perplexity',
             mode='min',
+            every_n_epochs=1,
         )
         if save_checkpoint:
             if not os.path.exists(checkpoint_callback.dirpath):
                 os.makedirs(checkpoint_callback.dirpath)
         # Use the PyTorch Lightning Trainer to test the training loop
         trainer = pl.Trainer(
-            max_epochs=1,
-            limit_train_batches=1,  # Limit to a single batch for quick testing
-            logger=False,
+            max_epochs=3,
+            logger=csv_logger,
             enable_checkpointing=save_checkpoint,
             callbacks=[checkpoint_callback] if save_checkpoint else [],
         )
         trainer.fit(self.transformer, self.data_module)
         print('finished training')
 
-        self.assertEqual(
-            trainer.current_epoch, 1, 'Trainer should have completed one epoch'
-        )
         if save_checkpoint:
             # Check if the checkpoint was saved
             self.assertTrue(

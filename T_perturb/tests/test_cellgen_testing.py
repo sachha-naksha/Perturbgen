@@ -15,14 +15,15 @@ from T_perturb.tests.test_countdecoder_training import dummy_cell_gene_matrix
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
 
 
 class CellGenTestGenerationCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super(CellGenTestGenerationCase, self).__init__(*args, **kwargs)
-        self.time_step = [1, 2]
-        self.total_time_steps = 2
+        self.pred_tps = [1, 2]
+        self.context_tps = [1, 2]
+        self.n_total_tps = 2
         self.max_seq_length = 50
         self.tgt_vocab_size = 101  # +1 for padding token
         self.num_genes = self.tgt_vocab_size - 1
@@ -31,7 +32,10 @@ class CellGenTestGenerationCase(unittest.TestCase):
         self.num_samples = 100
 
     def setUp(self):
+        # Reproducibility
         pl.seed_everything(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
         # set conditions and conditions_combined to None if no batch effect
         conditions = None
@@ -50,13 +54,13 @@ class CellGenTestGenerationCase(unittest.TestCase):
         tgt_counts_dict = dummy_cell_gene_matrix(
             num_cells=self.num_samples,
             num_genes=self.num_genes,
-            total_time_steps=self.total_time_steps,
+            total_time_steps=self.n_total_tps,
         )
         tgt_datasets = dummy_dataset(
             max_len=self.max_seq_length,
             vocab_size=self.tgt_vocab_size,
             num_samples=100,
-            total_time_steps=self.total_time_steps,
+            total_time_steps=self.n_total_tps,
         )
         if condition_keys is None:
             condition_keys = 'tmp_batch'
@@ -142,14 +146,17 @@ class CellGenTestGenerationCase(unittest.TestCase):
             # lr_scheduler_factor=0.8,
             conditions=conditions_,
             conditions_combined=conditions_combined_,
+            n_genes=self.num_genes,
             dropout=0.0,
-            time_steps=self.time_step,
-            total_time_steps=2,
+            pred_tps=self.pred_tps,
+            context_tps=self.context_tps,
+            n_total_tps=self.n_total_tps,
             temperature=1.5,
             iterations=19,
+            precision='high',
             mask_scheduler='pow',
             output_dir='./T_perturb/T_perturb/tests/res',
-            mode='Transformer_encoder',
+            encoder='Transformer_encoder',
             seed=42,
             generate=True,
             var_list=None,
@@ -163,8 +170,9 @@ class CellGenTestGenerationCase(unittest.TestCase):
             tgt_datasets=tgt_datasets,
             batch_size=self.batch_size,
             num_workers=1,
-            time_steps=[1, 2],
-            total_time_steps=2,
+            pred_tps=self.pred_tps,
+            context_tps=self.context_tps,
+            n_total_tps=self.n_total_tps,
             train_indices=None,
             test_indices=np.random.choice(100, 20, replace=False),
             max_len=self.max_seq_length,

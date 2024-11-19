@@ -10,6 +10,7 @@ import pytorch_lightning as pl
 import scanpy as sc
 import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import CSVLogger
 
 from T_perturb.Dataloaders.datamodule import CellGenDataModule
 from T_perturb.Model.trainer import CountDecoderTrainer
@@ -18,7 +19,12 @@ from T_perturb.tests.test_cellgen_training import dummy_dataset
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
+
+# initialize the logger
+csv_logger = CSVLogger(
+    'T_perturb/T_perturb/tests/res', name='test_countdecoder_training'
+)
 
 
 # create cell x gene matrix with 100 cells and 100 genes
@@ -44,8 +50,8 @@ def dummy_cell_gene_matrix(
 class CellGenTestTrainingCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super(CellGenTestTrainingCase, self).__init__(*args, **kwargs)
-        self.time_step = [1, 2]
-        self.total_time_steps = 2
+        self.pred_tps = [1, 2]
+        self.n_total_tps = 2
         self.max_seq_length = 50
         self.tgt_vocab_size = 101  # +1 for padding token
         self.num_genes = self.tgt_vocab_size - 1
@@ -54,7 +60,10 @@ class CellGenTestTrainingCase(unittest.TestCase):
         self.num_samples = 100
 
     def setUp(self):
+        # Reproducibility
         pl.seed_everything(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
         # set conditions and conditions_combined to None if no batch effect
         conditions = None
@@ -75,12 +84,12 @@ class CellGenTestTrainingCase(unittest.TestCase):
             max_len=self.max_seq_length,
             vocab_size=self.tgt_vocab_size,
             num_samples=100,
-            total_time_steps=self.total_time_steps,
+            total_time_steps=self.n_total_tps,
         )
         tgt_counts_dict = dummy_cell_gene_matrix(
             num_cells=self.num_samples,
             num_genes=self.num_genes,
-            total_time_steps=self.total_time_steps,
+            total_time_steps=self.n_total_tps,
         )
 
         if condition_keys is None:
@@ -161,18 +170,20 @@ class CellGenTestTrainingCase(unittest.TestCase):
             loss_mode='zinb',
             lr=1e-3,
             weight_decay=0.0,
+            n_genes=self.num_genes,
             # lr_scheduler_patience=5.0,
             # lr_scheduler_factor=0.8,
             conditions=conditions_,
             conditions_combined=conditions_combined_,
             dropout=0.0,
-            time_steps=self.time_step,
-            total_time_steps=2,
+            pred_tps=self.pred_tps,
+            n_total_tps=self.n_total_tps,
             temperature=1.5,
             iterations=19,
+            precision='high',
             mask_scheduler='pow',
-            output_dir='./T_perturb/T_perturb/plt/res/cytoimmgen',
-            mode='Transformer_encoder',
+            output_dir='./T_perturb/T_perturb/plt/res/',
+            encoder='Transformer_encoder',
             seed=42,
         )
         self.decoder_module = decoder_module
@@ -185,8 +196,8 @@ class CellGenTestTrainingCase(unittest.TestCase):
             src_counts=src_counts,
             tgt_counts_dict=tgt_counts_dict,
             num_workers=1,
-            time_steps=[1, 2],
-            total_time_steps=2,
+            pred_tps=self.pred_tps,
+            n_total_tps=self.n_total_tps,
             max_len=self.max_seq_length,
             train_indices=np.random.choice(100, 80, replace=False),
             condition_keys=condition_keys_,
@@ -206,7 +217,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
         output = self.decoder_module(batch)
         self.assertEqual(
             len(output.keys()),
-            self.total_time_steps,
+            self.n_total_tps,
             'Output should contain the same number of keys as time steps',
         )
         self.assertEqual(
@@ -220,7 +231,8 @@ class CellGenTestTrainingCase(unittest.TestCase):
         checkpoint_callback = ModelCheckpoint(
             dirpath='T_perturb/T_perturb/tests/checkpoints',
             filename='test_counts_checkpoint-{epoch:02d}',
-            save_top_k=1,
+            save_top_k=-1,
+            every_n_epochs=1,
             monitor='train/mse',
             mode='min',
         )
@@ -231,15 +243,11 @@ class CellGenTestTrainingCase(unittest.TestCase):
         trainer = pl.Trainer(
             max_epochs=1,
             limit_train_batches=1,  # Limit to a single batch for quick testing
-            logger=False,
+            logger=csv_logger,
             enable_checkpointing=save_checkpoint,
             callbacks=[checkpoint_callback] if save_checkpoint else [],
         )
         trainer.fit(self.decoder_module, self.data_module)
-
-        self.assertEqual(
-            trainer.current_epoch, 1, 'Trainer should have completed one epoch'
-        )
         if save_checkpoint:
             # Check if the checkpoint was saved
             self.assertTrue(

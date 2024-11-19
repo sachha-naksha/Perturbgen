@@ -138,3 +138,6 @@ wandb
 checkpoints
 *.test/
 Geneformer/
+.torch25/
+*.h5ad
+final_results/

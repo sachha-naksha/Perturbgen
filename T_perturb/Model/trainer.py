@@ -5,12 +5,15 @@ from typing import (
     Any,
     Dict,
     List,
+    Literal,
     Optional,
 )
 
 import anndata as ad
+import evaluate
 import numpy as np
 import pandas as pd
+import scanpy as sc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,28 +25,38 @@ from scvi.distributions import NegativeBinomial, ZeroInflatedNegativeBinomial
 from torchmetrics import MeanSquaredError
 from torchmetrics.text import Perplexity
 
-from T_perturb.Model.metric import evaluate_emd
 from T_perturb.Modules.T_model import CellGen, CountDecoder
 from T_perturb.src.losses import mse_loss
-from T_perturb.src.utils import (
+from T_perturb.src.metric import (
+    compute_distribution_distances,
+    evaluate_emd,
+    evaluate_mmd,
+    lin_reg_summary,
+)
+from T_perturb.src.utils import (  # WarmupScheduler,;
+    aggregate_attn_weights,
     compute_cos_similarity,
     modify_ckpt_state_dict,
     pearson,
+    return_attn_weights,
     return_cos_similarity,
     return_gene_embeddings,
-    WarmupScheduler
+    return_generation_adata,
+    return_prediction_adata,
+    scale_pca,
 )
 
 # from deepspeed.ops.adam import FusedAdam
 
 
-if torch.cuda.is_available():
-    cuda_device_name = torch.cuda.get_device_name()
+def set_matmul_precision_for_device(precision: Literal['high', 'medium'] = 'high'):
+    if torch.cuda.is_available():
+        cuda_device_name = torch.cuda.get_device_name()
     # If the device is an A100, set the precision for matrix multiplication
     if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
         print(f'Using {cuda_device_name} for training')
-        print('Set float32_matmul_precision to medium')
-        torch.set_float32_matmul_precision('medium')
+        print(f'Set float32_matmul_precision to {precision}')
+        torch.set_float32_matmul_precision(precision)
 
 
 class CellGenTrainer(LightningModule):
@@ -58,26 +71,38 @@ class CellGenTrainer(LightningModule):
         dropout: float = 0.0,
         mlm_probability: float = 0.15,
         weight_decay: float = 0.0,
-        initial_lr: float = 1e-5,
+        initial_lr: float = 1e-4,
         end_lr: float = 1e-3,
-        # lr_scheduler_patience: float = 5.0,
         return_embeddings: bool = False,
+        return_attn: bool = False,
         generate: bool = False,
-        time_steps: list = [1, 2],
-        total_time_steps: int = 3,
+        pred_tps: list = [1, 2],
+        n_total_tps: int = 3,
+        num_epochs: int = 5,
+        warmup_epochs: int = 1,
+        pad_token_id: int = 0,
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
-        mode: str = 'GF_fine_tuned',
+        encoder: str = 'GF_fine_tuned',
+        mask_scheduler: str = 'cosine',
         context_mode: bool = True,
+        pos_encoding_mode: Literal[
+            'time_pos_sin', 'comb_sin', 'sin_learnt'
+        ] = 'time_pos_sin',
+        precision: Literal['high', 'medium'] = 'medium',
         var_list: Optional[List[str]] = None,
         gene_names: Optional[List[str]] = None,
         mapping_dict_path: Optional[str] = None,
-        num_epochs: int= 5,
-        warmup_epochs: int=1,
-        *args,
-        **kwargs,
+        context_tps: Optional[List[int]] = None,
+        # *args,
+        # **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.save_hyperparameters()
+        set_matmul_precision_for_device(precision)
+        print('start training')
+        if context_tps is None:
+            context_tps = pred_tps
+        self.context_tps = context_tps
         self.transformer = CellGen(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -87,20 +112,22 @@ class CellGenTrainer(LightningModule):
             max_seq_length=max_seq_length,
             dropout=dropout,
             mlm_probability=mlm_probability,
-            time_steps=time_steps,
-            total_time_steps=total_time_steps,
-            mode=mode,
+            pred_tps=pred_tps,
+            context_tps=context_tps,
+            n_total_tps=n_total_tps,
+            encoder=encoder,
+            mask_scheduler=mask_scheduler,
+            pos_encoding_mode=pos_encoding_mode,
+            return_attn=return_attn,
         )
-        self.num_epochs = num_epochs
-        self.warmup_epochs = warmup_epochs
         self.masking_loss = nn.CrossEntropyLoss()
         self.timepoint_loss = nn.CrossEntropyLoss()
 
         self.weight_decay = weight_decay
-        self.initial_lr = initial_lr 
+        self.initial_lr = initial_lr
         self.end_lr = end_lr
-        # self.lr_scheduler_patience = lr_scheduler_patience
-        # self.lr_scheduler_factor = lr_scheduler_factor
+        self.num_epochs = num_epochs
+        self.warmup_epochs = warmup_epochs
         self.perplexity = Perplexity(ignore_index=-100)
         self.mse = MeanSquaredError()
         if mapping_dict_path is not None:
@@ -108,20 +135,35 @@ class CellGenTrainer(LightningModule):
                 mapping_dict_path,
                 'rb',
             ) as f:
-                self.subset_tokenid_to_genename = pickle.load(f)
+                gene_to_rowid = pickle.load(f)
+        with open(
+            './T_perturb/T_perturb/pp/res/hspc/tokenid_to_rowid_hvg.pkl',
+            'rb',
+        ) as f:
+            tokenid_to_rowid = pickle.load(f)
+        self.tokenid_to_rowid = tokenid_to_rowid
+        # swarp key and value
+        self.gene_to_rowid = {v: k for k, v in gene_to_rowid.items()}
         self.return_embeddings = return_embeddings
         self.generate = generate
         self.tgt_vocab_size = tgt_vocab_size
-        self.time_steps = time_steps
+        self.pred_tps = pred_tps
+        self.n_total_tps = n_total_tps
         self.context_mode = context_mode
+
         self.test_dict: Dict[str, List[Any]] = {
             'true_counts': [],
             'cls_embeddings': [],
             'cosine_similarities': [],
             'batch': [],
             'cell_idx': [],
-            'gene_embeddings': [],
         }
+
+        for t in range(1, n_total_tps + 1):
+            self.test_dict[f'gene_embeddings_t{t}'] = []
+            if return_attn:
+                self.test_dict[f'self_attn_weights_t{t}'] = []
+                self.test_dict[f'cross_attn_weights_t{t}'] = []
         if var_list is not None:
             self.var_list = var_list
             for var in self.var_list:
@@ -130,11 +172,13 @@ class CellGenTrainer(LightningModule):
             self.var_list = []
 
         self.marker_genes = None
+        self.pad_token_id = pad_token_id
         self.gene_names = gene_names
-        # register buffer for CLS
         total_vocab_size = tgt_vocab_size
+        # register buffer for CLS
         # initialize cls token for all time steps
-        for i in range(1, total_time_steps + 1):
+        self.total_tps = list(range(1, n_total_tps + 1))
+        for i in self.total_tps:
             # i-1, as first token is tgt_vocab_size
             self.register_buffer(
                 f'cls_token_{str(i)}',
@@ -144,15 +188,18 @@ class CellGenTrainer(LightningModule):
                 ),
             )
             print(f'cls_token_{str(i)}', getattr(self, f'cls_token_{str(i)}'))
+            # update mapping_dict to include cls token
+            self.gene_to_rowid[f'cls_token_{str(i)}'] = total_vocab_size + (i - 1)
         self.output_dir = output_dir
         # create directory if not exist
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
-        self.date = datetime.now().strftime('%Y%m%d')
+        self.date = datetime.now().strftime('%Y%m%d-%H:%M')
+        self.return_attn = return_attn
 
     def forward(self, batch):
-        tgt_input_id_dict = {}
-        for i in self.time_steps:
+        self.tgt_input_id_dict = {}
+        for i in self.pred_tps:
             tgt_input_id_ = torch.cat(
                 (
                     getattr(self, f'cls_token_{str(i)}').expand(
@@ -162,53 +209,75 @@ class CellGenTrainer(LightningModule):
                 ),
                 dim=1,
             )
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = tgt_input_id_
+            self.tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         outputs = self.transformer(
             src_input_id=batch['src_input_ids'],
-            tgt_input_id_dict=tgt_input_id_dict,
+            tgt_input_id_dict=self.tgt_input_id_dict,
             not_masked=self.return_embeddings,
             context_mode=self.context_mode,
         )
         return outputs
 
     def configure_optimizers(self):
-        parameters = [{'params': self.transformer.parameters(), 'lr': self.lr}]
+        parameters = [{'params': self.transformer.parameters(), 'lr': self.initial_lr}]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
-        # Calculate total steps and warmup steps based on number_of_batches_per_epoch
-        number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
-        total_steps = self.num_epochs * number_of_batches_per_epoch
-        warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
-        scheduler = WarmupScheduler(optimizer, warmup_steps=warmup_steps, initial_lr=self.initial_lr, end_lr=self.end_lr)
+
+        # number_of_batches_per_epoch = len(self.trainer.datamodule.train_dataloader())
+        # total_steps = self.num_epochs * number_of_batches_per_epoch
+        # warmup_steps = self.warmup_epochs * number_of_batches_per_epoch
+        # scheduler = WarmupScheduler(
+
+        #     optimizer,
+        #     warmup_steps=warmup_steps,
+        #     initial_lr=self.initial_lr,
+        #     end_lr=self.end_lr,
+        # )
 
         # optimizer = FusedAdam(
-        #     self.transformer.parameters(), lr=self.lr, weight_decay=self.weight_decay
-        # )
-        # lr_scheduler = WarmupCosineLR(
-        #     optimizer,
-        #     total_num_steps=2000,
-        #     # mode='min',
-        #     warmup_type = 'linear',
-        #     # patience=self.lr_scheduler_patience,
+        #     self.transformer.parameters(),
+        #     lr=self.initial_lr,
+        #     weight_decay=self.weight_decay,
+        #     adam_w_mode=False,
         # )
         return {
             'optimizer': optimizer,
-            'lr_scheduler': scheduler,
-            # 'scheduler_type': 'WarmupCosineLR',
             'monitor': 'train/masking_loss',
-            'interval': 'step',
+            # 'lr_scheduler': {
+            #     'scheduler': scheduler,
+            #     'interval': 'step',
+            #     'frequency': 1
+            # }
         }
 
     def training_step(self, batch, *args, **kwargs):
-        # logits, labels, count_output, count_dropout = self.forward(batch)
+        # log learning rate
+        self.log(
+            'lr',
+            self.trainer.optimizers[0].param_groups[0]['lr'],
+            on_step=True,
+            on_epoch=False,
+            prog_bar=True,
+            logger=True,
+        )
         outputs = self.forward(batch)
         dec_logits = outputs['dec_logits']
         labels = outputs['labels']
-        perp = self.perplexity(dec_logits, labels)
+        with torch.no_grad():
+            perp = self.perplexity(dec_logits, labels)
+            self.log(
+                'train/perplexity',
+                perp,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                batch_size=batch['tgt_input_ids_t1'].shape[0],
+                rank_zero_only=True,
+                sync_dist=True,
+            )
         dec_logits = dec_logits.contiguous().view(-1, dec_logits.size(-1))
         labels = labels.contiguous().view(-1)
-
         masking_loss = self.masking_loss(dec_logits, labels)
-
         self.log(
             'train/masking_loss',
             masking_loss,
@@ -220,19 +289,6 @@ class CellGenTrainer(LightningModule):
             rank_zero_only=True,
             sync_dist=True,
         )
-
-        self.log(
-            'train/perplexity',
-            perp,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=batch['tgt_input_ids_t1'].shape[0],
-            rank_zero_only=True,
-            sync_dist=True,
-        )
-
         return masking_loss
 
     def on_train_epoch_end(self):
@@ -274,134 +330,125 @@ class CellGenTrainer(LightningModule):
     def test_step(self, batch, *args, **kwargs):
         if self.return_embeddings:
             outputs = self.forward(batch)
-            for time_step in self.time_steps:
-                token_ids = batch[f'tgt_input_ids_t{time_step}']
-                cell_ids = batch[f'tgt_cell_idx_t{time_step}']
-                (
-                    cos_similarity,
-                    cls_embeddings,
-                    gene_embeddings,
-                ) = compute_cos_similarity(
-                    outputs=outputs, time_step=time_step, all_time_steps=self.time_steps
-                )
 
-                # define marker gene list to extract gene embeddings
-                marker_genes = [
-                    'IL7R',
-                    'CD52',
-                    'GIMAP7',
-                    'SARAF',
-                    'BTG1',
-                    'LTB',
-                    'CXCR4',
-                    'STAT1',
-                    'IRF1',
-                    'IFIT3',
-                    'GBP1',
-                    'SYNE2',
-                    'SOCS3',
-                    'IL4R',
-                    'CD69',
-                    'MIR155HG',
-                    'DDX21',
-                    'TNFRSF4',
-                    'HSP90AA1',
-                    'HSP90AB1',
-                    'HSPA8',
-                    'TXN',
-                    'FABP5',
-                    'TUBA1B',
-                    'HMGA1',
-                    'PCNA',
-                    'IL2RA',
-                    'BATF',
-                    'CD63',
-                    'IFITM2',
-                    'CORO1B',
-                    'ISG15',
-                    'ALDOC',
-                    'DDIT4',
-                    'LGALS1',
-                    'S100A4',
-                    'S100A6',
-                    'VIM',
-                    'CD74',
-                    'HLA-DRA',
-                    'HLA-DRB1',
+            for t in self.pred_tps:
+                token_ids = self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
+                # 1. compute cosine similarity
+                cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
+                # load marker genes
+                with open(
+                    './T_perturb/T_perturb/plt/res/hspc/embeddings/'
+                    'res/cos_sim/top_genes_celltype_v2_10k.pkl',
+                    'rb',
+                ) as f:
+                    marker_genes = pickle.load(f)
+                # select keys MEMP, GMP and LMPP
+                marker_genes_ = {
+                    key: marker_genes[key] for key in ['MEMP', 'GMP', 'LMPP']
+                }
+                # concatenate all marker genes which are in a list
+                marker_genes_all = [
+                    gene for genes in marker_genes_.values() for gene in genes
                 ]
-
+                marker_genes_all = list(set(marker_genes_all))
+                # 2. map cosine similarity to corresponding genes
                 marker_cos_similarity, marker_genes_dict = return_cos_similarity(
-                    marker_genes=marker_genes,
                     cos_similarity=cos_similarity,
-                    gene_embeddings=gene_embeddings,
-                    mapping_dict=self.subset_tokenid_to_genename,
+                    mapping_dict=self.gene_to_rowid,
                     token_ids=token_ids,
+                    marker_genes=marker_genes_all,
                 )
-                marker_gene_embeddings = return_gene_embeddings(
-                    marker_genes=marker_genes,
-                    gene_embeddings=gene_embeddings,
-                    mapping_dict=self.subset_tokenid_to_genename,
+                # take the non zero mean of the gene embeddings
+                gene_embeddings = return_gene_embeddings(
+                    # marker_genes=marker_genes,
+                    gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],
+                    mapping_dict=self.gene_to_rowid,
                     token_ids=token_ids,
+                    marker_genes=marker_genes_all,
                 )
+                if self.return_attn:
+                    context_tps = [tp for tp in self.context_tps if tp != t]
+                    # extract context_ids
+                    context_ids = [batch['src_input_ids']]
+                    context_ids.extend(
+                        [
+                            self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
+                            for t in context_tps
+                        ]
+                    )
+                    self_attn_weights, cross_attn_weights = return_attn_weights(
+                        outputs=outputs,
+                        tgt_mapping_dict=self.gene_to_rowid,
+                        src_mapping_dict=self.tokenid_to_rowid,
+                        time_step=t,
+                        token_ids=token_ids,
+                        pad_token_id=self.pad_token_id,
+                        context_token_ids=context_ids,
+                    )
+                    self_attn_weights = self_attn_weights.mean(dim=0).detach().cpu()
+                    cross_attn_weights = cross_attn_weights.mean(dim=0).detach().cpu()
+                    self.test_dict[f'self_attn_weights_t{t}'].append(self_attn_weights)
+                    self.test_dict[f'cross_attn_weights_t{t}'].append(
+                        cross_attn_weights
+                    )
                 self.marker_genes = marker_genes_dict
-                self.test_dict['true_counts'].append(
-                    batch[f'tgt_counts_t{time_step}'].detach().cpu()
-                )
-                self.test_dict['cls_embeddings'].append(cls_embeddings.detach().cpu())
-                self.test_dict['cosine_similarities'].append(
-                    marker_cos_similarity.detach().cpu()
-                )
-                self.test_dict['batch'].append(batch['combined_batch'].detach().cpu())
-                self.test_dict['cell_idx'].append(cell_ids)
-                self.test_dict['gene_embeddings'].append(
-                    marker_gene_embeddings.detach().cpu()
-                )
+                cos_similarity = marker_cos_similarity.detach().cpu()
+                cos_similarity = cos_similarity.to(torch.float16)
+                gene_embeddings = gene_embeddings.detach().cpu()
+                gene_embeddings = gene_embeddings.to(torch.float16)
+                true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
+                cls_embeddings = outputs['mean_embedding'][t].detach().cpu()
+                # gene_embeddings = marker_gene_embeddings.detach().cpu()
+                combined_batch = batch['combined_batch'].detach().cpu()
+                self.test_dict['true_counts'].append(true_counts)
+                self.test_dict['cls_embeddings'].append(cls_embeddings)
+                self.test_dict[f'gene_embeddings_t{t}'].append(gene_embeddings)
+                self.test_dict['cosine_similarities'].append(cos_similarity)
+                # self.test_dict['gene_embeddings'].append(gene_embeddings)
+                self.test_dict['batch'].append(combined_batch)
+                self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
                 if len(self.var_list) > 0:
                     for var in self.var_list:
-                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
+                        self.test_dict[var].append(batch[f'{var}_t{t}'])
 
     def on_test_epoch_end(self):
+        if self.return_attn:
+            for t in range(1, self.n_total_tps + 1):
+                self_attn_weights = torch.stack(
+                    self.test_dict[f'self_attn_weights_t{t}']
+                )
+                cross_attn_weights = torch.stack(
+                    self.test_dict[f'cross_attn_weights_t{t}']
+                )
+                # order genes based on ascending order of  rowid
+                tgt_gene_order = sorted(self.gene_to_rowid, key=self.gene_to_rowid.get)
+                aggregate_attn_weights(
+                    attn_weights=self_attn_weights,
+                    tgt_gene_names=tgt_gene_order,
+                    output_dir=self.output_dir,
+                    file_name=f'{self.date}_self_attn_weights_t{t}',
+                )
+                aggregate_attn_weights(
+                    attn_weights=cross_attn_weights,
+                    tgt_gene_names=tgt_gene_order,
+                    src_gene_names=tgt_gene_order[
+                        : -self.n_total_tps
+                    ],  # exclude cls token
+                    output_dir=self.output_dir,
+                    file_name=f'{self.date}_cross_attn_weights_t{t}',
+                )
         if self.return_embeddings:
-            print('Start saving embeddings -------------------')
-            cls_embeddings = torch.cat(self.test_dict['cls_embeddings'])
-            true_counts = torch.cat(self.test_dict['true_counts'])
-            cosine_similarities = torch.cat(self.test_dict['cosine_similarities'])
-            batch = torch.cat(self.test_dict['batch'])
-            cell_ids = np.concatenate(self.test_dict['cell_idx'])
-            gene_embeddings = torch.cat(self.test_dict['gene_embeddings'])
-            if len(self.var_list) > 0:
-                var_dict = {}
-                for var in self.var_list:
-                    var_dict[var] = np.concatenate(self.test_dict[var])
-                test_obs = pd.DataFrame(var_dict)
-            else:
-                test_obs = pd.DataFrame()
-            test_obs['batch'] = np.array(batch)
-            test_obs['cell_idx'] = cell_ids
-            adata = ad.AnnData(
-                X=true_counts.numpy(),
-                obs=test_obs,
-                obsm={
-                    'cls_embeddings': cls_embeddings.numpy(),
-                    'gene_embeddings': gene_embeddings.numpy(),
-                },
-                uns={
-                    'marker_genes': self.marker_genes,
-                },
+            obs_key = self.var_list if len(self.var_list) > 0 else []
+            obs_key.extend(['batch', 'cell_idx'])
+            return_prediction_adata(
+                test_dict=self.test_dict,
+                obs_key=obs_key,
+                marker_genes=self.marker_genes,
+                gene_names=self.gene_names,
+                output_dir=self.output_dir,
+                file_name=f'{self.date}_prediction_embeddings',
+                n_total_tps=self.n_total_tps,
             )
-            if self.gene_names is not None:
-                adata.var_names = self.gene_names
-            df = pd.DataFrame(
-                cosine_similarities.numpy(), columns=self.marker_genes.keys()
-            )
-            df.index = adata.obs_names
-            adata.obsm['cosine_similarity'] = df
-            # save anndata
-            adata.write_h5ad(
-                f'{self.output_dir}/{self.date}_'
-                f'maskgit_masking_cls_embeddings_cosine_similarity.h5ad'
-            )
-            print('End saving embeddings -------------------')
 
 
 class CountDecoderTrainer(LightningModule):
@@ -416,31 +463,51 @@ class CountDecoderTrainer(LightningModule):
         loss_mode: str = 'mse',
         lr: float = 1e-3,
         weight_decay: float = 0.0,
-        lr_scheduler_patience: float = 1.0,
-        # lr_scheduler_factor: float = 0.8,
         dropout: float = 0.0,
         generate: bool = False,
         var_list: List[str] = ['Time_point'],
-        time_steps: list = [1, 2],
-        total_time_steps: int = 3,
+        pred_tps: list = [1, 2],
+        n_total_tps: int = 3,
         temperature: float = 2.0,
         iterations: int = 18,
         n_samples: int = 1,
+        precision: Literal['high', 'medium'] = 'medium',
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
-        mode: str = 'GF_fine_tuned',
+        encoder: str = 'GF_fine_tuned',
+        mapping_dict_path: str = (
+            './T_perturb/Geneformer/geneformer/' 'token_dictionary_gc95M.pkl'
+        ),
         seed: int = 42,
         context_mode: bool = True,
+        n_genes: int = 25426,
+        pos_encoding_mode: Literal[
+            'time_pos_sin', 'comb_sin', 'sin_learnt'
+        ] = 'time_pos_sin',
         mask_scheduler: Optional[str] = 'cosine',
+        sequence_length: int = 2048,
+        return_rouge_score=True,
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
         ckpt_count_path: Optional[str] = None,
         conditions: Optional[Dict[Any, Any]] = None,
         conditions_combined: Optional[List[Any]] = None,
+        unique_gene_list: Optional[Dict[Any, Any]] = None,
+        shared_gene_list: Optional[Dict[Any, Any]] = None,
+        context_tps: Optional[List[int]] = None,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
+        set_matmul_precision_for_device(precision)
+        if mapping_dict_path is not None:
+            with open(
+                mapping_dict_path,
+                'rb',
+            ) as f:
+                ensembl_to_token_id = pickle.load(f)
+        # change to token_id to gene name
+        self.token_id_to_ensembl = {v: k for k, v in ensembl_to_token_id.items()}
         pretrained_model = CellGen(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -448,10 +515,13 @@ class CountDecoderTrainer(LightningModule):
             num_layers=num_layers,
             d_ff=d_ff,
             max_seq_length=max_seq_length,
-            time_steps=time_steps,
-            total_time_steps=total_time_steps,
-            mode=mode,
+            pred_tps=pred_tps,
+            context_tps=context_tps,
+            n_total_tps=n_total_tps,
+            encoder=encoder,
+            pos_encoding_mode=pos_encoding_mode,
         )
+        self.pos_encoding_mode = pos_encoding_mode
         # load PETRA checkpoint
         if ckpt_masking_path is not None:
             checkpoint = torch.load(ckpt_masking_path, map_location='cpu')
@@ -460,18 +530,19 @@ class CountDecoderTrainer(LightningModule):
             # set parameters to not trainable
             for param in pretrained_model.parameters():
                 param.requires_grad = False
-
+        self.return_rouge_score = return_rouge_score
+        if self.return_rouge_score:
+            self.rouge = evaluate.load('rouge')
         self.decoder = CountDecoder(
             pretrained_model=pretrained_model,
             loss_mode=loss_mode,
-            tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
             dropout=dropout,
-            time_steps=time_steps,
-            total_time_steps=total_time_steps,
+            pred_tps=pred_tps,
+            context_tps=context_tps,
             context_mode=context_mode,
+            n_genes=n_genes,
         )
-
         if ckpt_count_path is not None:
             checkpoint = torch.load(ckpt_count_path, map_location='cpu')
 
@@ -480,8 +551,6 @@ class CountDecoderTrainer(LightningModule):
 
         self.weight_decay = weight_decay
         self.lr = lr
-        self.lr_scheduler_patience = lr_scheduler_patience
-        # self.lr_scheduler_factor = lr_scheduler_factor
         self.loss_mode = loss_mode
         self.max_seq_length = max_seq_length
         if (
@@ -493,16 +562,16 @@ class CountDecoderTrainer(LightningModule):
             self.n_conditions_combined = len(conditions_combined)
 
             self.theta = torch.nn.Parameter(
-                torch.randn(tgt_vocab_size - 1, self.n_conditions_combined)
+                torch.randn(n_genes, self.n_conditions_combined)
             )
         else:
             self.theta = None
 
         self.mse = MeanSquaredError()
         total_vocab_size = tgt_vocab_size
-        self.time_steps = time_steps
-        self.total_time_steps = total_time_steps  # for generation
-        for i in range(1, total_time_steps + 1):
+        self.pred_tps = pred_tps
+        self.total_tps = list(range(1, n_total_tps + 1))
+        for i in self.total_tps:
             self.register_buffer(
                 f'cls_token_{str(i)}',
                 torch.tensor(
@@ -516,13 +585,29 @@ class CountDecoderTrainer(LightningModule):
         self.mask_scheduler = mask_scheduler
         self.temperature = temperature
         self.iterations = iterations
-
+        self.sequence_length = sequence_length
+        self.output_dir = output_dir
+        # create directory if not exist
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+        # create variables based
+        # initiate lists to store true, ctrl and pred counts
+        self.train_dict: Dict[str, List[Any]] = {'true_counts': [], 'pred_counts': []}
+        self.val_dict: Dict[str, List[Any]] = {
+            'true_counts': [],
+            'pred_counts': [],
+        }
         self.test_dict: Dict[str, List[Any]] = {
             'true_counts': [],
             'ctrl_counts': [],
             'pred_counts': [],
             'cls_embeddings': [],
+            'cell_idx': [],
         }
+        if self.return_rouge_score:
+            self.rouge_seq_len_list = [25, 100, max_seq_length]
+            for seq_len in self.rouge_seq_len_list:
+                self.test_dict[f'rouge1_{seq_len}'] = []
         self.n_samples = n_samples
         if var_list is not None:
             self.var_list = var_list
@@ -530,29 +615,17 @@ class CountDecoderTrainer(LightningModule):
                 self.test_dict[var] = []
         else:
             self.var_list = []
-        self.output_dir = output_dir
-        # create directory if not exist
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-        # create variables based
-        # initiate lists to store true, ctrl and pred counts
-        self.train_true_counts_list: List[int] = []
-        self.train_pred_counts_list: List[int] = []
-        self.val_true_counts_list: List[int] = []
-        self.val_pred_delta_counts_list: List[int] = []
-        self.val_true_delta_counts_list: List[int] = []
-        self.val_pred_counts_list: List[int] = []
-        self.val_tgt_cell_type_list: List[str] = []
-        self.val_tgt_cell_population_list: List[str] = []
-        self.val_tgt_donor_list: List[str] = []
-        self.mode = mode
+        self.encoder = encoder
         self.seed = seed
-        self.date = datetime.now().strftime('%Y%m%d')
+        self.date = datetime.now().strftime('%Y%m%d-%H:%M')
+        # guided generation
+
+        self.unique_gene_list = unique_gene_list
+        self.shared_gene_list = shared_gene_list
 
     def forward(self, batch):
         tgt_input_id_dict = {}
-
-        for i in self.time_steps:
+        for i in self.pred_tps:
             tgt_input_id_ = torch.cat(
                 (
                     getattr(self, f'cls_token_{str(i)}').expand(
@@ -562,7 +635,7 @@ class CountDecoderTrainer(LightningModule):
                 ),
                 dim=1,
             )
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = tgt_input_id_
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         outputs = self.decoder(
             src_input_id=batch['src_input_ids'],
             tgt_input_id_dict=tgt_input_id_dict,
@@ -605,11 +678,6 @@ class CountDecoderTrainer(LightningModule):
         batch: Dict[str, torch.Tensor],
         n_samples: int = 1,
     ):
-        loss_list = []
-        count_dict = {}
-        dispersion = (
-            self.compute_dispersion(batch) if self.loss_mode in ['zinb', 'nb'] else None
-        )
         """
         Description:
         ------------
@@ -622,36 +690,40 @@ class CountDecoderTrainer(LightningModule):
         batch: `Dict[str, torch.Tensor]`
             batch variables capturing technical batch effect variables
         n_samples: `int`
-            number of samples to draw from distribution for zinb and nb
+            number of samples to draw from distribution for zinb and nb loss
 
         Returns:
         --------
-        loss: `torch.Tensor`
-            loss value
-        count_dict: `Dict[str, torch.Tensor]`
-            dictionary containing predicted counts
+        `Tuple[torch.Tensor, Dict[str, torch.Tensor]]` \n
+            - loss: `torch.Tensor`
+                loss value
+            - count_dict: `Dict[str, torch.Tensor]`
+                dictionary containing predicted counts
         """
-        for time_step in self.time_steps:
+        count_dict = {}
+        dispersion = (
+            self.compute_dispersion(batch) if self.loss_mode in ['zinb', 'nb'] else None
+        )
+        total_loss = 0
+        for time_step in self.pred_tps:
             count_ouput = outputs[f'count_output_t{time_step}']
-            true_counts = batch[f'tgt_counts_t{time_step}']
-            batch_size_factor = batch[f'tgt_size_factor_t{time_step}']
+            true_values = batch[f'tgt_counts_t{time_step}']
+            batch_size_factor = batch[f'tgt_size_factor_t{time_step}'].unsqueeze(1)
 
             if self.loss_mode == 'mse':
                 # change true counts dtype to count output dtype
-                true_counts = true_counts.type(count_ouput['count_lognorm'].dtype)
+                true_values = true_values.type(count_ouput['count_lognorm'].dtype)
                 loss = (
-                    mse_loss(count_ouput['count_lognorm'], true_counts)
+                    mse_loss(count_ouput['count_lognorm'], true_values)
                     .sum(dim=-1)
                     .mean()
                     .float()
                 )
                 count_dict[time_step] = count_ouput['count_lognorm']
             elif self.loss_mode in ['zinb', 'nb']:
-                dec_mean_gamma = count_ouput['count_mean']
-                dec_mean = dec_mean_gamma * batch_size_factor.unsqueeze(1).expand(
-                    dec_mean_gamma.size(0), dec_mean_gamma.size(1)
+                dec_mean = count_ouput['count_mean'] * batch_size_factor.expand_as(
+                    count_ouput['count_mean']
                 )
-
                 if self.loss_mode == 'zinb':
                     dec_dropout = count_ouput['count_dropout']
                     zinb_distribution = ZeroInflatedNegativeBinomial(
@@ -659,7 +731,7 @@ class CountDecoderTrainer(LightningModule):
                         theta=dispersion,
                         zi_logits=dec_dropout,
                     )
-                    loss = -zinb_distribution.log_prob(true_counts).sum(dim=-1).mean()
+                    loss = -zinb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
                         count_dict[time_step] = dec_mean
                     else:
@@ -669,15 +741,95 @@ class CountDecoderTrainer(LightningModule):
 
                 elif self.loss_mode == 'nb':
                     nb_distribution = NegativeBinomial(mu=dec_mean, theta=dispersion)
-                    loss = -nb_distribution.log_prob(true_counts).sum(dim=-1).mean()
+                    loss = -nb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
                         count_dict[time_step] = dec_mean
                     else:
                         x_pred = nb_distribution.sample((n_samples,))
                         count_dict[time_step] = x_pred.mean(dim=0)
-            loss_list.append(loss)
-        loss = torch.sum(torch.stack(loss_list))
-        return loss, count_dict
+            total_loss += loss
+        return total_loss, count_dict
+
+    def compute_mse_metric(
+        self,
+        pred_counts: dict[str, torch.Tensor],
+        batch: dict[str, torch.Tensor],
+        true_counts_key: str,
+        time_steps: list[str],
+        res_dict: dict[str, list],
+        save_to_cpu: bool = False,
+    ) -> tuple[float, dict[str, list[Any]]]:
+        total_mse = 0.0
+        for time_step in time_steps:
+            pred_count = pred_counts[time_step]
+            true_count = batch[f'{true_counts_key}_t{time_step}']
+            # MSE
+            mse = self.mse(pred_count, true_count)
+            total_mse += mse
+            if save_to_cpu:
+                pred_count = pred_count.detach().cpu()
+                true_count = true_count.detach().cpu()
+            res_dict['pred_counts'].append(pred_count)
+            res_dict['true_counts'].append(true_count)
+        mean_mse = total_mse / len(time_steps)
+        return mean_mse, res_dict
+
+    def map_token_to_ensembl(self, val):
+        return self.token_id_to_ensembl.get(
+            val, val
+        )  # Return mapped value, or original if not in dict
+
+    def compute_rouge_score(
+        self,
+        pred_ids: np.ndarray,
+        tgt_ids: np.ndarray,
+        rouge_len_list: list[int],
+        max_seq_length: int,
+        test_dict: dict[str, list],
+    ) -> tuple[dict[str, list[Any]], dict[Any, Any]]:
+        rouge_score = {}
+        pred_ids = pred_ids.astype(object)
+        pred_ids = pred_ids[:, 1:]  # exclude task token
+        tgt_ids = tgt_ids.astype(object)
+        special_tokens = np.array([0, 1, 2, 3])
+        pred_ids[np.isin(pred_ids, special_tokens)] = ''
+        tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
+        # convert all int to str
+        pred_ids_ = pred_ids.astype(str)
+        tgt_ids_ = tgt_ids.astype(str)
+        # # Vectorize the function to apply to the entire matrix
+        # vectorized_map = np.vectorize(self.map_token_to_ensembl)
+        # # TODO: rewrite the function without mapping dict
+        # # Apply the mapping
+        # pred_ids_ = vectorized_map(pred_ids)
+        # tgt_ids_ = vectorized_map(tgt_ids)
+        for seq_len in rouge_len_list:
+            if max_seq_length > seq_len:
+                pred_genes_short = pred_ids_[:, :seq_len]
+                true_genes_short = tgt_ids_[:, :seq_len]
+            else:
+                pred_genes_short = pred_ids_
+                true_genes_short = tgt_ids_
+            pred_ids_str = np.apply_along_axis(
+                lambda row: ' '.join(row), axis=1, arr=pred_genes_short
+            )
+            tgt_ids_str = np.apply_along_axis(
+                lambda row: ' '.join(row), axis=1, arr=true_genes_short
+            )
+            # remove all the trailing spaces
+            pred_ids_str = np.array([' '.join(s.split()) for s in pred_ids_str])
+            tgt_ids_str = np.array([' '.join(s.split()) for s in tgt_ids_str])
+            # create a list of strings
+            pred_ids_str = pred_ids_str.tolist()
+            tgt_ids_str = tgt_ids_str.tolist()
+            # compute rouge score
+            rouge_score = self.rouge.compute(
+                predictions=pred_ids_str,
+                references=tgt_ids_str,
+                rouge_types=['rouge1'],
+            )
+            test_dict[f'rouge1_{seq_len}'].append(rouge_score['rouge1'])
+        return test_dict, rouge_score
 
     def training_step(self, batch, *args, **kwargs):
         outputs = self.forward(batch)
@@ -692,49 +844,41 @@ class CountDecoderTrainer(LightningModule):
             batch_size=batch['tgt_input_ids_t1'].shape[0],
             sync_dist=True,
         )
-
-        mse_all = []
-        for time_step in self.time_steps:
-            pred_count = pred_counts_dict[time_step]
-            true_count = batch[f'tgt_counts_t{time_step}']
-            # MSE
-            mse = self.mse(pred_count, true_count)
-            mse_all.append(mse)
-            # gather for validation step
-            self.train_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
-            self.train_pred_counts_list.append(pred_count)
-
-        mean_mse = torch.mean(torch.stack(mse_all))
-
-        self.log(
-            'train/mse',
-            mean_mse,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
+        with torch.no_grad():
+            mean_mse, res_dict = self.compute_mse_metric(
+                pred_counts_dict, batch, 'tgt_counts', self.pred_tps, self.train_dict
+            )
+            self.train_dict = res_dict
+            self.log(
+                'train/mse',
+                mean_mse,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+            )
 
         return count_loss
 
     def on_train_epoch_end(self):
-        # return Pearson correlation coefficient
-        true_counts = torch.cat(self.train_true_counts_list)
-        pred_counts = torch.cat(self.train_pred_counts_list)
-        # Pearson correlation coefficient
-        mean_pearson = pearson(pred_counts=pred_counts, true_counts=true_counts)
-        self.log(
-            'train/pearson',
-            mean_pearson,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        # set to status quo
-        self.train_true_counts_list = []
-        self.train_pred_counts_list = []
+        with torch.no_grad():
+            # return Pearson correlation coefficient
+            true_counts = torch.cat(self.train_dict['true_counts'])
+            pred_counts = torch.cat(self.train_dict['pred_counts'])
+            # Pearson correlation coefficient
+            mean_pearson = pearson(pred_counts=pred_counts, true_counts=true_counts)
+            self.log(
+                'train/pearson',
+                mean_pearson,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+            )
+            # set to status quo
+            self.train_true_counts_list = []
+            self.train_pred_counts_list = []
 
     def validation_step(self, batch, *args, **kwargs):
         outputs = self.forward(batch)
@@ -753,20 +897,14 @@ class CountDecoderTrainer(LightningModule):
             batch_size=batch['tgt_input_ids_t1'].shape[0],
             sync_dist=True,
         )
-        # MSE
-        mse_all = []
-
-        for time_step in self.time_steps:
-            pred_count = pred_counts_dict[time_step]
-            true_count = batch[f'tgt_counts_t{time_step}']
-            # MSE
-            mse = self.mse(pred_count, true_count)
-            mse_all.append(mse)
-            # gather for validation step
-            self.val_true_counts_list.append(batch[f'tgt_counts_t{time_step}'])
-            self.val_pred_counts_list.append(pred_count)
-
-        mean_mse = torch.mean(torch.stack(mse_all))
+        mean_mse, res_dict = self.compute_mse_metric(
+            pred_counts_dict,
+            batch,
+            'tgt_counts',
+            self.pred_tps,
+            self.val_dict,
+        )
+        self.val_dict = res_dict
         self.log(
             'val/mse',
             mean_mse,
@@ -776,8 +914,6 @@ class CountDecoderTrainer(LightningModule):
             logger=True,
             sync_dist=True,
         )
-
-        return count_loss
 
     def on_validation_epoch_end(self):
         # return Pearson correlation coefficient
@@ -797,7 +933,7 @@ class CountDecoderTrainer(LightningModule):
 
     def test_step(self, batch, *args, **kwargs):
         tgt_input_id_dict = {}
-        for i in range(1, self.total_time_steps + 1):
+        for i in self.total_tps:
             tgt_input_id_ = torch.cat(
                 (
                     getattr(self, f'cls_token_{str(i)}').expand(
@@ -807,25 +943,59 @@ class CountDecoderTrainer(LightningModule):
                 ),
                 dim=1,
             )
-            tgt_input_id_dict[f'tgt_input_id_t{i}'] = tgt_input_id_
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         if self.generate:
-            outputs = self.decoder.generate(
-                src_input_id=batch['src_input_ids'],
-                tgt_input_id_dict=tgt_input_id_dict,
-                max_len=self.max_seq_length,
-                mask_scheduler=self.mask_scheduler,
-                can_remask_prev_masked=False,
-                topk_filter_thres=0.9,
-                # time_steps=self.time_steps,
-                temperature=self.temperature,
-                iterations=self.iterations,
-            )
+            decoder_kwargs = {
+                'src_input_id': batch['src_input_ids'],
+                'tgt_input_id_dict': tgt_input_id_dict,
+                'mask_scheduler': self.mask_scheduler,
+                'can_remask_prev_masked': False,
+                'topk_filter_thres': 0.9,
+                'temperature': self.temperature,
+                'iterations': self.iterations,
+                'sequence_length': self.sequence_length,
+            }
+            if (self.unique_gene_list is not None) or (
+                self.shared_gene_list is not None
+            ):
+                decoder_kwargs['unique_gene_list'] = self.unique_gene_list
+                decoder_kwargs['shared_gene_list'] = self.shared_gene_list
+                outputs, pred_ids_dict = self.decoder.guided_generate(
+                    **decoder_kwargs,
+                )
+            else:
+                outputs, pred_ids_dict = self.decoder.generate(
+                    **decoder_kwargs,
+                )
+            # print(pred_ids_dict)
+            for time_step in pred_ids_dict.keys():
+                if self.return_rouge_score:
+                    pred_ids = pred_ids_dict[time_step].detach().cpu().numpy()
+                    tgt_ids = batch[time_step].detach().cpu().numpy()
+                    test_dict, rouge_score = self.compute_rouge_score(
+                        pred_ids=pred_ids,
+                        tgt_ids=tgt_ids,
+                        rouge_len_list=self.rouge_seq_len_list,
+                        max_seq_length=self.max_seq_length,
+                        test_dict=self.test_dict,
+                    )
+                    self.test_dict = test_dict
+                    self.log(
+                        'test/rouge1',
+                        rouge_score['rouge1'],
+                        on_step=False,
+                        on_epoch=True,
+                        prog_bar=True,
+                        logger=True,
+                        rank_zero_only=True,
+                        sync_dist=True,
+                        batch_size=batch['src_input_ids'].shape[0],
+                    )
             count_loss, pred_counts_dict = self.compute_count_loss(
                 outputs=outputs,
                 batch=batch,
                 n_samples=self.n_samples,
             )
-
             self.log(
                 'test/loss',
                 count_loss,
@@ -833,25 +1003,17 @@ class CountDecoderTrainer(LightningModule):
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
-                batch_size=batch[f'tgt_input_ids_t{self.time_steps[0]}'].shape[0],
+                batch_size=batch[f'tgt_input_ids_t{self.pred_tps[0]}'].shape[0],
             )
-            mse_all = []
-            for time_step in self.time_steps:
-                pred_count = pred_counts_dict[time_step]
-                true_count = batch[f'tgt_counts_t{time_step}']
-                # MSE
-                mse = self.mse(pred_count, true_count)
-                mse_all.append(mse)
-                # gather for validation step
-                self.test_dict['pred_counts'].append(pred_count)
-                self.test_dict['true_counts'].append(true_count)
-                if len(self.var_list) > 0:
-                    for var in self.var_list:
-                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
-                cls_embeddings = outputs[f'cls_embedding_t{time_step}']
-                self.test_dict['cls_embeddings'].append(cls_embeddings)
-
-            mean_mse = torch.mean(torch.stack(mse_all))
+            mean_mse, res_dict = self.compute_mse_metric(
+                pred_counts_dict,
+                batch,
+                'tgt_counts',
+                self.pred_tps,
+                self.test_dict,
+                save_to_cpu=True,
+            )
+            self.test_dict = res_dict
             self.log(
                 'test/mse',
                 mean_mse,
@@ -861,10 +1023,20 @@ class CountDecoderTrainer(LightningModule):
                 logger=True,
                 sync_dist=True,
             )
-
+            for time_step in self.pred_tps:
+                self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{time_step}'])
+                if len(self.var_list) > 0:
+                    for var in self.var_list:
+                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
+                cls_embeddings = outputs[f'cls_embedding_t{time_step}'].detach().cpu()
+                self.test_dict['cls_embeddings'].append(cls_embeddings)
         else:
             outputs = self.forward(batch)
-            count_loss, pred_count = self.compute_count_loss(outputs, batch)
+            count_loss, pred_count = self.compute_count_loss(
+                outputs,
+                batch,
+                n_samples=self.n_samples,
+            )
             self.log(
                 'test/loss',
                 count_loss,
@@ -872,121 +1044,113 @@ class CountDecoderTrainer(LightningModule):
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
-                batch_size=batch['tgt_input_ids'].shape[0],
+                batch_size=batch['src_input_ids'].shape[0],
             )
-
-            self.test_dict['pred_counts'].append(pred_count)
-            self.test_dict['true_counts'].append(batch['tgt_counts'])
-            self.test_dict['ctrl_counts'].append(batch['src_counts'])
-            if len(self.var_list) > 0:
-                for var in self.var_list:
-                    self.test_dict[var].append(batch[var])
+            for time_step in self.pred_tps:
+                self.test_dict['pred_counts'].append(pred_count[time_step])
+                self.test_dict['true_counts'].append(batch[f'tgt_counts_t{time_step}'])
+                if len(self.var_list) > 0:
+                    for var in self.var_list:
+                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
 
     def on_test_epoch_end(self):
         if self.generate:
-            print('---Generating anndata')
-            true_counts = torch.cat(self.test_dict['true_counts']).detach().cpu()
-            pred_counts = torch.cat(self.test_dict['pred_counts']).detach().cpu()
-            # create dict to var_list values
-            if len(self.var_list) > 0:
-                var_dict = {}
-                for var in self.var_list:
-                    var_dict[var] = np.concatenate(self.test_dict[var])
-                test_obs = pd.DataFrame(var_dict)
-            else:
-                test_obs = None
-            cls_embeddings = torch.cat(self.test_dict['cls_embeddings']).detach().cpu()
-            pred_adata = ad.AnnData(X=pred_counts.numpy(), obs=test_obs)
-            pred_adata.layers['counts'] = true_counts.numpy()
-            pred_adata.obsm['cls_embeddings'] = cls_embeddings.numpy()
+            obs_key = self.var_list if len(self.var_list) > 0 else []
+            obs_key.extend(['cell_idx'])
+            pred_adata = return_generation_adata(
+                test_dict=self.test_dict,
+                obs_key=obs_key,
+                output_dir=self.output_dir,
+                file_name=(
+                    f'{self.date}_generate_adata_'
+                    f't{self.pred_tps}_{self.encoder}_s{self.seed}_'
+                    f'l{self.loss_mode}_n{self.n_samples}'
+                    f'_p{self.pos_encoding_mode}_'
+                    f'm{self.mask_scheduler}_s{self.sequence_length}'
+                ),
+            )
+            # save metrics
+            metric_mean = {}
+            # true counts are stored in the 'counts' layer
             true_adata = pred_adata.copy()
-            true_adata.X = true_counts.numpy()
-            # create output directory
-            # save adata
-            pred_adata.write_h5ad(
-                f'{self.output_dir}/{self.date}_'
-                f'random_pairing_stratified_pairing_generate_adata_'
-                f'{self.time_steps}_{self.mode}_{self.seed}_'
-                f'{self.loss_mode}_{self.n_samples}.h5ad'
-            )
-            print('---anndata generation completed')
-            emd = evaluate_emd(true_adata, pred_adata)
-            self.log(
-                'test/emd',
-                emd['emd'].mean(),
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-        else:
-            # return Pearson correlation coefficient
-            true_counts = torch.cat(self.test_true_counts_list)
-            pred_counts = torch.cat(self.test_pred_counts_list)
-            ctrl_counts = torch.cat(self.test_ctrl_counts_list)
-            var_dict = {}
-            for var in self.var_list:
-                var_dict[var] = np.concatenate(self.test_dict[var])
-            test_obs = pd.DataFrame(var_dict)
-            pred_adata = ad.AnnData(
-                X=pred_counts.numpy(), obs=test_obs, var=self.adata.var
-            )
-            pred_adata.layers['counts'] = true_counts.numpy()
-            pred_adata.write_h5ad(f'{self.output_dir}/pred_adata.h5ad')
-            # ----------------- calculate metrics -----------------
-            mean_pearson = pearson(pred_counts, true_counts)
-            # Pearson correlation coefficient
-            self.log(
-                'test/pearson',
-                mean_pearson,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-            # Pearson delta
-            mean_pearson_delta = pearson(pred_counts, true_counts, ctrl_counts)
-            self.log(
-                'test/pearson_delta',
-                mean_pearson_delta,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-            )
-            # MSE
-            mse = self.mse(pred_counts, true_counts)
+            true_adata.X = true_adata.layers['counts']
+            # log norm and compute PCA
+            pred_adata = scale_pca(pred_adata)
+            true_adata = scale_pca(true_adata)
+            # scale pca
+            coords = true_adata.obsm['X_pca']
+            coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
+            true_adata.obsm['X_pca_scaled'] = coords
+            coords = pred_adata.obsm['X_pca']
+            coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
+            pred_adata.obsm['X_pca_scaled'] = coords
 
-            metrics = pd.DataFrame(
-                {
-                    'pearson': [mean_pearson.cpu().detach().numpy()],
-                    'pearson_delta': [mean_pearson_delta.cpu().detach().numpy()],
-                    'mse': [mse.cpu().detach().numpy()],
-                }
+            # subsample 25k cells
+            if pred_adata.shape[0] > 10000:
+                sc.pp.subsample(pred_adata, n_obs=10000, copy=False)
+                # use obs index to subsample true counts
+                true_adata = true_adata[pred_adata.obs.index]
+            mmd_wasserstein = compute_distribution_distances(
+                torch.tensor(true_adata.obsm['X_pca_scaled']).float(),
+                torch.tensor(pred_adata.obsm['X_pca_scaled']).float(),
             )
-            metrics.to_csv(f'{self.output_dir}/test_metrics.csv')
-            # # calculate MMD and EMD
-            # mmd = evaluate_mmd(self.adata, pred_adata)
-            # mmd['metric'] = 'mmd'
-            # # rename column called mmd
-            # mmd = mmd.rename(columns={'mmd': 'value'})
-            emd = evaluate_emd(self.adata, pred_adata)
-            emd['metric'] = 'emd'
-            emd = emd.rename(columns={'emd': 'value'})
+            for metric in mmd_wasserstein:
+                metric_mean[metric + '_PCA'] = mmd_wasserstein[metric]
+            emd_df = evaluate_emd(true_adata, pred_adata)
             self.log(
                 'test/emd',
-                emd['value'].mean(),
+                emd_df['emd'].mean(),
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
             )
-            # # concatenate
-            # metrics = pd.concat([mmd, emd])
-            # # save metrics
-            # metrics.to_csv(
-            #     f'{self.output_dir}/test_mmd_emd_{condition_key}_metrics.csv'
-            # )
-            # set to status quo
-            self.test_true_counts_list = []
-            self.test_ctrl_counts_list = []
-            self.test_pred_counts_list = []
+
+            print('---Metrics saved')
+            if self.return_rouge_score:
+                if self.test_dict[f'rouge1_{self.rouge_seq_len_list[0]}']:
+                    for seq_len in self.rouge_seq_len_list:
+                        metric_mean[f'rouge1_{seq_len}'] = np.mean(
+                            self.test_dict[f'rouge1_{seq_len}']
+                        )
+
+            metrics = pd.DataFrame(metric_mean, index=[0])
+            # add metrics on the gene space
+            lin_reg_df = lin_reg_summary(true_adata, pred_adata)
+            mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
+            metrics = pd.concat([metrics, emd_df, lin_reg_df, mmd_df], axis=1)
+            metrics.to_csv(
+                f'{self.output_dir}/{self.date}_p{self.pos_encoding_mode}_'
+                f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
+                f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
+            )
+
+        # else:
+        #     var_dict = {}
+        #     for var in self.var_list:
+        #         var_dict[var] = np.concatenate(self.test_dict[var])
+        #     test_obs = pd.DataFrame(var_dict)
+        #     pred_adata = ad.AnnData(X=pred_counts.numpy(), obs=test_obs)
+        #     pred_adata.layers['counts'] = true_counts.numpy()
+        #     pred_adata.write_h5ad(f'{self.output_dir}/pred_adata.h5ad')
+        #     # true counts are stored in the 'counts' layer
+        #     true_adata = pred_adata.copy()
+        #     true_adata.X = true_adata.layers['counts']
+        #     # ----------------- calculate metrics -----------------
+        #     # MSE
+        #     lin_reg_df = lin_reg_summary(true_adata, pred_adata)
+        #     mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
+        #     emd = evaluate_emd(true_adata, pred_adata)
+        #     metric_df = pd.concat([lin_reg_df, mmd_df, emd], axis=1)
+        #     metric_df.to_csv(f'{self.output_dir}/test_metrics.csv')
+        #     emd['metric'] = 'emd'
+        #     emd = emd.rename(columns={'emd': 'value'})
+        #     self.log(
+        #         'test/emd',
+        #         emd['value'].mean(),
+        #         on_epoch=True,
+        #         prog_bar=True,
+        #         logger=True,
+        #     )
 
     def configure_optimizers(self):
         # optimizer = FusedAdam(
@@ -994,16 +1158,7 @@ class CountDecoderTrainer(LightningModule):
         # )
         parameters = [{'params': self.decoder.parameters(), 'lr': self.lr}]
         optimizer = optim.Adam(parameters, weight_decay=self.weight_decay)
-        # lr_scheduler = WarmupCosineLR(
-        #     optimizer,
-        #     total_num_steps=2000,
-        #     # mode='min',
-        #     warmup_type = 'linear',
-        #     # patience=self.lr_scheduler_patience,
-        # )
         return {
             'optimizer': optimizer,
-            # 'lr_scheduler': lr_scheduler,
-            # 'scheduler_type': 'WarmupCosineLR',
             'monitor': 'train/loss',
         }
