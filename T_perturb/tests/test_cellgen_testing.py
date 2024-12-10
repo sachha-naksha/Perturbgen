@@ -142,6 +142,7 @@ class CellGenTestGenerationCase(unittest.TestCase):
             loss_mode='zinb',
             lr=1e-3,
             weight_decay=0.0,
+            sequence_length=self.max_seq_length - 10,
             # lr_scheduler_patience=5.0,
             # lr_scheduler_factor=0.8,
             conditions=conditions_,
