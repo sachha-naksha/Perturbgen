@@ -1315,10 +1315,13 @@ class CountDecoder(nn.Module):
                 pad=tgt_pad,
             )
             # cls_embedding = outputs['dec_embedding'][:, 0, :]
-
-            count_outputs_tmp = self.count_decoder.forward(cls_embedding)
-            count_outputs[f'count_output_t{time_step}'] = count_outputs_tmp
-            count_outputs[f'cls_embedding_t{time_step}'] = cls_embedding
+            count_outputs[f'count_output_t{time_step}'] = self.count_decoder.forward(
+                cls_embedding
+            )
+            count_outputs[f'cls_embedding_t{time_step}'] = outputs['dec_embedding'][
+                :, 0, :
+            ]
+            count_outputs[f'mean_embedding_t{time_step}'] = outputs['mean_embedding']
         return count_outputs, generate_id_dict
 
     def guided_generate(
@@ -1435,14 +1438,12 @@ class CountDecoder(nn.Module):
                 prompt_length=cls_length,
             )
             generate_id_dict[tgt_input_id_key] = generated_ids
-            cls_embedding = mean_nonpadding_embs(
-                embs=outputs['dec_embedding'],
-                pad=tgt_pad,
-            )
-            # cls_embedding = outputs['dec_embedding'][:, 0, :]
-            count_outputs_tmp = self.count_decoder.forward(cls_embedding)
+            count_outputs_tmp = self.count_decoder.forward(outputs['mean_embedding'])
             count_outputs[f'count_output_t{time_step}'] = count_outputs_tmp
-            count_outputs[f'cls_embedding_t{time_step}'] = cls_embedding
+            count_outputs[f'cls_embedding_t{time_step}'] = outputs['dec_embedding'][
+                :, 0, :
+            ]
+            count_outputs[f'mean_embedding_t{time_step}'] = outputs['mean_embedding']
         return count_outputs, generate_id_dict
 
     def generate_sequence(

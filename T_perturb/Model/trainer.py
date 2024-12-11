@@ -7,6 +7,7 @@ from typing import (
     List,
     Literal,
     Optional,
+    Union,
 )
 
 import anndata as ad
@@ -22,6 +23,7 @@ import torch.optim as optim
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
 from pytorch_lightning import LightningModule
 from scvi.distributions import NegativeBinomial, ZeroInflatedNegativeBinomial
+from torch.nn.functional import cosine_similarity
 from torchmetrics import MeanSquaredError
 from torchmetrics.text import Perplexity
 
@@ -487,7 +489,6 @@ class CountDecoderTrainer(LightningModule):
         mask_scheduler: Optional[str] = 'cosine',
         sequence_length: int = 2048,
         return_rouge_score=True,
-        perturbation: bool = False,
         var_list: Optional[List[str]] = None,
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
@@ -497,9 +498,6 @@ class CountDecoderTrainer(LightningModule):
         unique_gene_list: Optional[Dict[Any, Any]] = None,
         shared_gene_list: Optional[Dict[Any, Any]] = None,
         context_tps: Optional[List[int]] = None,
-        genes_to_perturb: Optional[List[int]] = None,
-        perturbation_token: Optional[int] = None,
-        cell_type_to_perturb: Optional[str] = None,
         *args,
         **kwargs,
     ):
@@ -630,11 +628,6 @@ class CountDecoderTrainer(LightningModule):
 
         self.unique_gene_list = unique_gene_list
         self.shared_gene_list = shared_gene_list
-
-        if perturbation:
-            self.perturbation = perturbation
-            self.genes_to_perturb = genes_to_perturb
-            self.perturbation_token = perturbation_token
 
     def forward(self, batch):
         tgt_input_id_dict = {}
@@ -799,50 +792,117 @@ class CountDecoderTrainer(LightningModule):
         rouge_len_list: list[int],
         max_seq_length: int,
         test_dict: dict[str, list],
-    ) -> tuple[dict[str, list[Any]], dict[Any, Any]]:
-        rouge_score = {}
+    ) -> tuple[dict[str, list], dict[str, list]]:
+        # Initialize a dictionary to store per-sample ROUGE scores
+        rouge_scores: dict[str, list] = {
+            f'rouge1_{seq_len}': [] for seq_len in rouge_len_list
+        }
+
+        # Convert predictions and targets to object type for string replacement
         pred_ids = pred_ids.astype(object)
-        pred_ids = pred_ids[:, 1:]  # exclude task token
         tgt_ids = tgt_ids.astype(object)
+
+        # Exclude task token (assumed to be the first token)
+        pred_ids = pred_ids[:, 1:]
+
+        # Define special tokens to remove (e.g., 0, 1, 2, 3)
         special_tokens = np.array([0, 1, 2, 3])
         pred_ids[np.isin(pred_ids, special_tokens)] = ''
         tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
-        # convert all int to str
+
+        # Convert all integers to strings
         pred_ids_ = pred_ids.astype(str)
         tgt_ids_ = tgt_ids.astype(str)
-        # # Vectorize the function to apply to the entire matrix
-        # vectorized_map = np.vectorize(self.map_token_to_ensembl)
-        # # TODO: rewrite the function without mapping dict
-        # # Apply the mapping
-        # pred_ids_ = vectorized_map(pred_ids)
-        # tgt_ids_ = vectorized_map(tgt_ids)
+
         for seq_len in rouge_len_list:
+            # Truncate sequences based on seq_len
             if max_seq_length > seq_len:
                 pred_genes_short = pred_ids_[:, :seq_len]
                 true_genes_short = tgt_ids_[:, :seq_len]
             else:
                 pred_genes_short = pred_ids_
                 true_genes_short = tgt_ids_
+
+            # Convert each row of token IDs to a string
             pred_ids_str = np.apply_along_axis(
                 lambda row: ' '.join(row), axis=1, arr=pred_genes_short
             )
             tgt_ids_str = np.apply_along_axis(
                 lambda row: ' '.join(row), axis=1, arr=true_genes_short
             )
-            # remove all the trailing spaces
+
+            # Remove extra spaces
             pred_ids_str = np.array([' '.join(s.split()) for s in pred_ids_str])
             tgt_ids_str = np.array([' '.join(s.split()) for s in tgt_ids_str])
-            # create a list of strings
-            pred_ids_str = pred_ids_str.tolist()
-            tgt_ids_str = tgt_ids_str.tolist()
-            # compute rouge score
-            rouge_score = self.rouge.compute(
-                predictions=pred_ids_str,
-                references=tgt_ids_str,
+            print('pred_ids', pred_ids_str.tolist())
+            print('tgt_ids', tgt_ids_str.tolist())
+            # Compute ROUGE score for the entire batch at once
+            rouge_result = self.rouge.compute(
+                predictions=pred_ids_str.tolist(),
+                references=tgt_ids_str.tolist(),
                 rouge_types=['rouge1'],
+                use_aggregator=False,
             )
-            test_dict[f'rouge1_{seq_len}'].append(rouge_score['rouge1'])
-        return test_dict, rouge_score
+            print(rouge_result)
+            # Extract the per-sample ROUGE scores
+            per_sample_scores = rouge_result['rouge1']
+            print(per_sample_scores)
+            # Store the results in the test_dict
+            rouge_scores[f'rouge1_{seq_len}'].extend(per_sample_scores)
+
+        return test_dict, rouge_scores
+
+    # def compute_rouge_score(
+    #     self,
+    #     pred_ids: np.ndarray,
+    #     tgt_ids: np.ndarray,
+    #     rouge_len_list: list[int],
+    #     max_seq_length: int,
+    #     test_dict: dict[str, list],
+    # ) -> tuple[dict[str, list[Any]], dict[Any, Any]]:
+    #     rouge_score = {}
+    #     pred_ids = pred_ids.astype(object)
+    #     pred_ids = pred_ids[:, 1:]  # exclude task token
+    #     tgt_ids = tgt_ids.astype(object)
+    #     special_tokens = np.array([0, 1, 2, 3])
+    #     pred_ids[np.isin(pred_ids, special_tokens)] = ''
+    #     tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
+    #     # convert all int to str
+    #     pred_ids_ = pred_ids.astype(str)
+    #     tgt_ids_ = tgt_ids.astype(str)
+    #     # # Vectorize the function to apply to the entire matrix
+    #     # vectorized_map = np.vectorize(self.map_token_to_ensembl)
+    #     # # TODO: rewrite the function without mapping dict
+    #     # # Apply the mapping
+    #     # pred_ids_ = vectorized_map(pred_ids)
+    #     # tgt_ids_ = vectorized_map(tgt_ids)
+    #     for seq_len in rouge_len_list:
+    #         if max_seq_length > seq_len:
+    #             pred_genes_short = pred_ids_[:, :seq_len]
+    #             true_genes_short = tgt_ids_[:, :seq_len]
+    #         else:
+    #             pred_genes_short = pred_ids_
+    #             true_genes_short = tgt_ids_
+    #         pred_ids_str = np.apply_along_axis(
+    #             lambda row: ' '.join(row), axis=1, arr=pred_genes_short
+    #         )
+    #         tgt_ids_str = np.apply_along_axis(
+    #             lambda row: ' '.join(row), axis=1, arr=true_genes_short
+    #         )
+    #         # remove all the trailing spaces
+    #         pred_ids_str = np.array([' '.join(s.split()) for s in pred_ids_str])
+    #         tgt_ids_str = np.array([' '.join(s.split()) for s in tgt_ids_str])
+    #         # create a list of strings
+    #         pred_ids_str = pred_ids_str.tolist()
+    #         tgt_ids_str = tgt_ids_str.tolist()
+    #         # compute rouge score
+    #         rouge_score = self.rouge.compute(
+    #             predictions=pred_ids_str,
+    #             references=tgt_ids_str,
+    #             rouge_types=['rouge1'],
+    #         )
+    #         test_dict[f'rouge1_{seq_len}'].append(rouge_score['rouge1'])
+    #     return test_dict, rouge_score
 
     def training_step(self, batch, *args, **kwargs):
         outputs = self.forward(batch)
@@ -947,6 +1007,7 @@ class CountDecoderTrainer(LightningModule):
     def test_step(self, batch, *args, **kwargs):
         tgt_input_id_dict = {}
         for i in self.total_tps:
+            print(i)
             tgt_input_id_ = torch.cat(
                 (
                     getattr(self, f'cls_token_{str(i)}').expand(
@@ -957,11 +1018,6 @@ class CountDecoderTrainer(LightningModule):
                 dim=1,
             )
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
-            if self.perturbation:
-                # replace gene token with perturbation token
-                mask = torch.isin(batch['src_input_ids'], self.genes_to_perturb)
-                batch['src_input_ids'][mask] = self.perturbation_token
-                print(batch['src_input_ids'])
         if self.generate:
             decoder_kwargs = {
                 'src_input_id': batch['src_input_ids'],
@@ -986,6 +1042,7 @@ class CountDecoderTrainer(LightningModule):
                     **decoder_kwargs,
                 )
             # print(pred_ids_dict)
+
             for time_step in pred_ids_dict.keys():
                 if self.return_rouge_score:
                     pred_ids = pred_ids_dict[time_step].detach().cpu().numpy()
@@ -1180,3 +1237,257 @@ class CountDecoderTrainer(LightningModule):
             'optimizer': optimizer,
             'monitor': 'train/loss',
         }
+
+
+class InSilicoPerturberGeneration(CountDecoderTrainer):
+    def __init__(
+        self,
+        genes_to_perturb: Optional[List[int]] = None,
+        perturbation_token: Optional[int] = None,
+        cell_type_to_perturb: Optional[str] = None,
+        perturbation_mode: Optional[Union[List[str], None]] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+
+        if perturbation_mode is not None:
+            self.perturbation_mode = perturbation_mode
+            self.genes_to_perturb = torch.tensor(genes_to_perturb, dtype=torch.long)
+            self.perturbation_token = torch.tensor(perturbation_token, dtype=torch.long)
+        else:
+            self.perturbation_mode = []
+
+    def test_step(self, batch, *args, **kwargs):
+        tgt_input_id_dict = {}
+        for i in self.total_tps:
+            print(i)
+            tgt_input_id_ = torch.cat(
+                (
+                    getattr(self, f'cls_token_{str(i)}').expand(
+                        batch[f'tgt_input_ids_t{i}'].shape[0], -1
+                    ),
+                    batch[f'tgt_input_ids_t{i}'],
+                ),
+                dim=1,
+            )
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
+            if len(self.perturbation_mode) > 0:
+                if 'tgt' in self.perturbation_mode:
+                    print('perturbating tgt')
+                    perturbed_tgt = batch[f'tgt_input_ids_t{i}'].clone()
+                    mask = torch.isin(
+                        batch[f'tgt_input_ids_t{i}'], self.genes_to_perturb
+                    )
+                    perturbed_tgt[mask] = self.perturbation_token
+        if len(self.perturbation_mode) > 0:
+            if 'src' in self.perturbation_mode:
+                print('perturbating src')
+                perturbed_src = batch['src_input_ids'].clone()
+                mask = torch.isin(batch['src_input_ids'], self.genes_to_perturb)
+                perturbed_src[mask] = self.perturbation_token
+        if self.generate:
+            decoder_kwargs = {
+                'tgt_input_id_dict': tgt_input_id_dict,
+                'mask_scheduler': self.mask_scheduler,
+                'can_remask_prev_masked': False,
+                'topk_filter_thres': 0.9,
+                'temperature': self.temperature,
+                'iterations': self.iterations,
+                'sequence_length': self.sequence_length,
+            }
+            print('perturbation', self.perturbation_mode)
+            if len(self.perturbation_mode) > 0:
+                true_outputs, true_ids_dict = self.decoder.generate(
+                    src_input_id=batch['src_input_ids'],
+                    **decoder_kwargs,
+                )
+                perturbed_outputs, perturbed_ids_dict = self.decoder.generate(
+                    src_input_id=perturbed_src,
+                    **decoder_kwargs,
+                )
+                print('true', true_ids_dict)
+                print('perturbed', perturbed_ids_dict)
+
+            else:
+                true_outputs, true_ids_dict = self.decoder.generate(
+                    src_input_id=batch['src_input_ids'],
+                    **decoder_kwargs,
+                )
+
+            for i, time_step in enumerate(true_ids_dict.keys()):
+                if len(self.perturbation_mode) > 0:
+                    pred_ids = perturbed_ids_dict[time_step].detach().cpu().numpy()
+                    tgt_ids = true_ids_dict[time_step].detach().cpu().numpy()
+                    # compute cosine similarity between perturbed and true
+                    t = i + 1
+                    print(perturbed_outputs[f'cls_embedding_t{t}'].shape)
+                    cls_cos_sim = cosine_similarity(
+                        perturbed_outputs[f'cls_embedding_t{t}'],
+                        true_outputs[f'cls_embedding_t{t}'],
+                    )
+                    mean_agg_cos_sim = cosine_similarity(
+                        perturbed_outputs[f'mean_embedding_t{t}'],
+                        true_outputs[f'mean_embedding_t{t}'],
+                    )
+                    print('cosine similarity', cls_cos_sim, mean_agg_cos_sim)
+
+                else:
+                    pred_ids = true_ids_dict[time_step].detach().cpu().numpy()
+                    tgt_ids = batch[time_step].detach().cpu().numpy()
+                if self.return_rouge_score:
+                    test_dict, rouge_score = self.compute_rouge_score(
+                        pred_ids=pred_ids,
+                        tgt_ids=tgt_ids,
+                        rouge_len_list=self.rouge_seq_len_list,
+                        max_seq_length=self.max_seq_length,
+                        test_dict=self.test_dict,
+                    )
+                    self.test_dict = test_dict
+                    # self.log(
+                    #     'test/rouge1',
+                    #     rouge_score['rouge1'],
+                    #     on_step=False,
+                    #     on_epoch=True,
+                    #     prog_bar=True,
+                    #     logger=True,
+                    #     rank_zero_only=True,
+                    #     sync_dist=True,
+                    #     batch_size=batch['src_input_ids'].shape[0],
+                    # )
+            for time_step in self.pred_tps:
+                self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{time_step}'])
+                if len(self.var_list) > 0:
+                    for var in self.var_list:
+                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
+                cls_embeddings = (
+                    true_outputs[f'cls_embedding_t{time_step}'].detach().cpu()
+                )
+                self.test_dict['cls_embeddings'].append(cls_embeddings)
+            count_loss, pred_counts_dict = self.compute_count_loss(
+                outputs=true_outputs,
+                batch=batch,
+                n_samples=self.n_samples,
+            )
+            self.log(
+                'test/loss',
+                count_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                batch_size=batch[f'tgt_input_ids_t{self.pred_tps[0]}'].shape[0],
+            )
+            mean_mse, res_dict = self.compute_mse_metric(
+                pred_counts_dict,
+                batch,
+                'tgt_counts',
+                self.pred_tps,
+                self.test_dict,
+                save_to_cpu=True,
+            )
+            self.test_dict = res_dict
+            self.log(
+                'test/mse',
+                mean_mse,
+                on_epoch=True,
+                on_step=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+            )
+
+        else:
+            outputs = self.forward(batch)
+            count_loss, pred_count = self.compute_count_loss(
+                outputs,
+                batch,
+                n_samples=self.n_samples,
+            )
+            self.log(
+                'test/loss',
+                count_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                batch_size=batch['src_input_ids'].shape[0],
+            )
+            for time_step in self.pred_tps:
+                self.test_dict['pred_counts'].append(pred_count[time_step])
+                self.test_dict['true_counts'].append(batch[f'tgt_counts_t{time_step}'])
+                if len(self.var_list) > 0:
+                    for var in self.var_list:
+                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
+
+    def on_test_epoch_end(self):
+        if self.generate:
+            pass
+            # obs_key = self.var_list if len(self.var_list) > 0 else []
+            # obs_key.extend(['cell_idx'])
+            # pred_adata = return_generation_adata(
+            #     test_dict=self.test_dict,
+            #     obs_key=obs_key,
+            #     output_dir=self.output_dir,
+            #     file_name=(
+            #         f'{self.date}_generate_adata_'
+            #         f't{self.pred_tps}_{self.encoder}_s{self.seed}_'
+            #         f'l{self.loss_mode}_n{self.n_samples}'
+            #         f'_p{self.pos_encoding_mode}_'
+            #         f'm{self.mask_scheduler}_s{self.sequence_length}'
+            #     ),
+            # )
+            # # save metrics
+            # metric_mean = {}
+            # # true counts are stored in the 'counts' layer
+            # true_adata = pred_adata.copy()
+            # true_adata.X = true_adata.layers['counts']
+            # # log norm and compute PCA
+            # pred_adata = scale_pca(pred_adata)
+            # true_adata = scale_pca(true_adata)
+            # # scale pca
+            # coords = true_adata.obsm['X_pca']
+            # coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
+            # true_adata.obsm['X_pca_scaled'] = coords
+            # coords = pred_adata.obsm['X_pca']
+            # coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
+            # pred_adata.obsm['X_pca_scaled'] = coords
+
+            # # subsample 25k cells
+            # if pred_adata.shape[0] > 10000:
+            #     sc.pp.subsample(pred_adata, n_obs=10000, copy=False)
+            #     # use obs index to subsample true counts
+            #     true_adata = true_adata[pred_adata.obs.index]
+            # mmd_wasserstein = compute_distribution_distances(
+            #     torch.tensor(true_adata.obsm['X_pca_scaled']).float(),
+            #     torch.tensor(pred_adata.obsm['X_pca_scaled']).float(),
+            # )
+            # for metric in mmd_wasserstein:
+            #     metric_mean[metric + '_PCA'] = mmd_wasserstein[metric]
+            # emd_df = evaluate_emd(true_adata, pred_adata)
+            # self.log(
+            #     'test/emd',
+            #     emd_df['emd'].mean(),
+            #     on_epoch=True,
+            #     prog_bar=True,
+            #     logger=True,
+            # )
+
+            # print('---Metrics saved')
+            # if self.return_rouge_score:
+            #     if self.test_dict[f'rouge1_{self.rouge_seq_len_list[0]}']:
+            #         for seq_len in self.rouge_seq_len_list:
+            #             metric_mean[f'rouge1_{seq_len}'] = np.mean(
+            #                 self.test_dict[f'rouge1_{seq_len}']
+            #             )
+
+            # metrics = pd.DataFrame(metric_mean, index=[0])
+            # # add metrics on the gene space
+            # lin_reg_df = lin_reg_summary(true_adata, pred_adata)
+            # mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
+            # metrics = pd.concat([metrics, emd_df, lin_reg_df, mmd_df], axis=1)
+            # metrics.to_csv(
+            #     f'{self.output_dir}/{self.date}_p{self.pos_encoding_mode}_'
+            #     f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
+            #     f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
+            # )
