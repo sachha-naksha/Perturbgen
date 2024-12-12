@@ -709,6 +709,80 @@ def return_generation_adata(
     return adata
 
 
+def return_pert_generation_adata(
+    test_dict: dict,
+    obs_key: list,
+    output_dir: str,
+    file_name: str,
+):
+    """
+    Description:
+    ------------
+    This function returns anndata object with predicted counts.
+    Parameters:
+    -----------
+    test_dict: `dict`
+        Dictionary containing test data.
+    obs_key: `list`
+        List of keys to include in adata.obs.
+    output_dir: `str`
+        Directory to save files in
+    file_name: `str`
+        Filename for output file
+    Returns:
+    --------
+    adata: `~anndata.AnnData` \n
+        Annotated data matrix with predicted counts. \n
+        - adata.X: `~numpy.ndarray`
+            Array of predicted counts.
+        - adata.obs: `~pandas.DataFrame`
+            DataFrame of obs_key.
+        - adata.var: `~pandas.DataFrame`
+            DataFrame of gene names.
+        - adata.obsm: `dict`
+            'cosine_similarity': `~pandas.DataFrame`
+                DataFrame of cosine similarities between true and predicted embeddings.
+            'rouge_scores': `~pandas.DataFrame`
+                DataFrame of rouge scores between true and predicted sequences.
+        - adata.layers: `~numpy.ndarray`
+                Array of true counts.
+    """
+    print('---Generating anndata')
+
+    # adata.obsm
+    cls_embeddings = torch.cat(test_dict['cls_embeddings']).numpy()
+    pert_dict = {}
+    pert_dict['cls_cosine_similarity'] = torch.cat(
+        test_dict['cls_cosine_similarity']
+    ).numpy()
+    pert_dict['mean_cosine_similarity'] = torch.cat(
+        test_dict['mean_cosine_similarity']
+    ).numpy()
+    # create dataframe to store perturbation results
+
+    # find all keys starting with rouge
+    for key in test_dict.keys():
+        if key.startswith('rouge'):
+            print(key)
+            print(test_dict[key])
+            pert_dict[key] = test_dict[key]
+
+    pert_df = pd.DataFrame(pert_dict)
+    print('perturbation dataframe', pert_df.head(10))
+    raise
+    # adata.obs
+    obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
+    test_obs = pd.DataFrame(obs_dict)
+    # create adata
+    adata = ad.AnnData(
+        obs=test_obs,
+        obsm={'cls_embeddings': cls_embeddings},
+    )
+    adata.write_h5ad(os.path.join(output_dir, file_name))
+    print('anndata generation completed---')
+    return adata
+
+
 def scale_pca(adata):
     '''
     Description

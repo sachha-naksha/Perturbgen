@@ -7,7 +7,6 @@ from typing import (
     List,
     Literal,
     Optional,
-    Union,
 )
 
 import anndata as ad
@@ -44,6 +43,7 @@ from T_perturb.src.utils import (  # WarmupScheduler,;
     return_cos_similarity,
     return_gene_embeddings,
     return_generation_adata,
+    return_pert_generation_adata,
     return_prediction_adata,
     scale_pca,
 )
@@ -489,7 +489,7 @@ class CountDecoderTrainer(LightningModule):
         mask_scheduler: Optional[str] = 'cosine',
         sequence_length: int = 2048,
         return_rouge_score=True,
-        var_list: Optional[List[str]] = None,
+        var_list: List[str] | None = None,
         tgt_adata: Optional[ad.AnnData] = None,
         ckpt_masking_path: Optional[str] = None,
         ckpt_count_path: Optional[str] = None,
@@ -792,12 +792,7 @@ class CountDecoderTrainer(LightningModule):
         rouge_len_list: list[int],
         max_seq_length: int,
         test_dict: dict[str, list],
-    ) -> tuple[dict[str, list], dict[str, list]]:
-        # Initialize a dictionary to store per-sample ROUGE scores
-        rouge_scores: dict[str, list] = {
-            f'rouge1_{seq_len}': [] for seq_len in rouge_len_list
-        }
-
+    ) -> dict[str, list[Any]]:
         # Convert predictions and targets to object type for string replacement
         pred_ids = pred_ids.astype(object)
         tgt_ids = tgt_ids.astype(object)
@@ -846,11 +841,10 @@ class CountDecoderTrainer(LightningModule):
             print(rouge_result)
             # Extract the per-sample ROUGE scores
             per_sample_scores = rouge_result['rouge1']
-            print(per_sample_scores)
             # Store the results in the test_dict
-            rouge_scores[f'rouge1_{seq_len}'].extend(per_sample_scores)
+            test_dict[f'rouge1_{seq_len}'].extend(per_sample_scores)
 
-        return test_dict, rouge_scores
+        return test_dict
 
     # def compute_rouge_score(
     #     self,
@@ -1047,7 +1041,7 @@ class CountDecoderTrainer(LightningModule):
                 if self.return_rouge_score:
                     pred_ids = pred_ids_dict[time_step].detach().cpu().numpy()
                     tgt_ids = batch[time_step].detach().cpu().numpy()
-                    test_dict, rouge_score = self.compute_rouge_score(
+                    test_dict = self.compute_rouge_score(
                         pred_ids=pred_ids,
                         tgt_ids=tgt_ids,
                         rouge_len_list=self.rouge_seq_len_list,
@@ -1055,17 +1049,6 @@ class CountDecoderTrainer(LightningModule):
                         test_dict=self.test_dict,
                     )
                     self.test_dict = test_dict
-                    self.log(
-                        'test/rouge1',
-                        rouge_score['rouge1'],
-                        on_step=False,
-                        on_epoch=True,
-                        prog_bar=True,
-                        logger=True,
-                        rank_zero_only=True,
-                        sync_dist=True,
-                        batch_size=batch['src_input_ids'].shape[0],
-                    )
             count_loss, pred_counts_dict = self.compute_count_loss(
                 outputs=outputs,
                 batch=batch,
@@ -1242,21 +1225,22 @@ class CountDecoderTrainer(LightningModule):
 class InSilicoPerturberGeneration(CountDecoderTrainer):
     def __init__(
         self,
-        genes_to_perturb: Optional[List[int]] = None,
-        perturbation_token: Optional[int] = None,
-        cell_type_to_perturb: Optional[str] = None,
-        perturbation_mode: Optional[Union[List[str], None]] = None,
+        genes_to_perturb: List[int] | None = None,
+        perturbation_token: int | None = 0,
+        cell_type_to_perturb: str | None = None,
+        perturbation_mode: List[str] | None = None,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-
         if perturbation_mode is not None:
             self.perturbation_mode = perturbation_mode
             self.genes_to_perturb = torch.tensor(genes_to_perturb, dtype=torch.long)
             self.perturbation_token = torch.tensor(perturbation_token, dtype=torch.long)
         else:
             self.perturbation_mode = []
+        self.test_dict['cls_cosine_similarity'] = []
+        self.test_dict['mean_cosine_similarity'] = []
 
     def test_step(self, batch, *args, **kwargs):
         tgt_input_id_dict = {}
@@ -1330,13 +1314,14 @@ class InSilicoPerturberGeneration(CountDecoderTrainer):
                         perturbed_outputs[f'mean_embedding_t{t}'],
                         true_outputs[f'mean_embedding_t{t}'],
                     )
-                    print('cosine similarity', cls_cos_sim, mean_agg_cos_sim)
+                    self.test_dict['cls_cosine_similarity'].append(cls_cos_sim)
+                    self.test_dict['mean_cosine_similarity'].append(mean_agg_cos_sim)
 
                 else:
                     pred_ids = true_ids_dict[time_step].detach().cpu().numpy()
                     tgt_ids = batch[time_step].detach().cpu().numpy()
                 if self.return_rouge_score:
-                    test_dict, rouge_score = self.compute_rouge_score(
+                    test_dict = self.compute_rouge_score(
                         pred_ids=pred_ids,
                         tgt_ids=tgt_ids,
                         rouge_len_list=self.rouge_seq_len_list,
@@ -1364,130 +1349,39 @@ class InSilicoPerturberGeneration(CountDecoderTrainer):
                     true_outputs[f'cls_embedding_t{time_step}'].detach().cpu()
                 )
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
-            count_loss, pred_counts_dict = self.compute_count_loss(
-                outputs=true_outputs,
-                batch=batch,
-                n_samples=self.n_samples,
-            )
-            self.log(
-                'test/loss',
-                count_loss,
-                on_step=True,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-                batch_size=batch[f'tgt_input_ids_t{self.pred_tps[0]}'].shape[0],
-            )
-            mean_mse, res_dict = self.compute_mse_metric(
-                pred_counts_dict,
-                batch,
-                'tgt_counts',
-                self.pred_tps,
-                self.test_dict,
-                save_to_cpu=True,
-            )
-            self.test_dict = res_dict
-            self.log(
-                'test/mse',
-                mean_mse,
-                on_epoch=True,
-                on_step=True,
-                prog_bar=True,
-                logger=True,
-                sync_dist=True,
-            )
-
-        else:
-            outputs = self.forward(batch)
-            count_loss, pred_count = self.compute_count_loss(
-                outputs,
-                batch,
-                n_samples=self.n_samples,
-            )
-            self.log(
-                'test/loss',
-                count_loss,
-                on_step=True,
-                on_epoch=True,
-                prog_bar=True,
-                logger=True,
-                batch_size=batch['src_input_ids'].shape[0],
-            )
-            for time_step in self.pred_tps:
-                self.test_dict['pred_counts'].append(pred_count[time_step])
-                self.test_dict['true_counts'].append(batch[f'tgt_counts_t{time_step}'])
-                if len(self.var_list) > 0:
-                    for var in self.var_list:
-                        self.test_dict[var].append(batch[f'{var}_t{time_step}'])
 
     def on_test_epoch_end(self):
         if self.generate:
-            pass
-            # obs_key = self.var_list if len(self.var_list) > 0 else []
-            # obs_key.extend(['cell_idx'])
-            # pred_adata = return_generation_adata(
-            #     test_dict=self.test_dict,
-            #     obs_key=obs_key,
-            #     output_dir=self.output_dir,
-            #     file_name=(
-            #         f'{self.date}_generate_adata_'
-            #         f't{self.pred_tps}_{self.encoder}_s{self.seed}_'
-            #         f'l{self.loss_mode}_n{self.n_samples}'
-            #         f'_p{self.pos_encoding_mode}_'
-            #         f'm{self.mask_scheduler}_s{self.sequence_length}'
-            #     ),
-            # )
-            # # save metrics
-            # metric_mean = {}
-            # # true counts are stored in the 'counts' layer
-            # true_adata = pred_adata.copy()
-            # true_adata.X = true_adata.layers['counts']
-            # # log norm and compute PCA
-            # pred_adata = scale_pca(pred_adata)
-            # true_adata = scale_pca(true_adata)
-            # # scale pca
-            # coords = true_adata.obsm['X_pca']
-            # coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
-            # true_adata.obsm['X_pca_scaled'] = coords
-            # coords = pred_adata.obsm['X_pca']
-            # coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
-            # pred_adata.obsm['X_pca_scaled'] = coords
+            obs_key = self.var_list if len(self.var_list) > 0 else []
+            obs_key.extend(['cell_idx'])
+            pred_adata = return_pert_generation_adata(
+                test_dict=self.test_dict,
+                obs_key=obs_key,
+                output_dir=self.output_dir,
+                file_name=(
+                    f'{self.date}_generate_adata_'
+                    f't{self.pred_tps}_{self.encoder}_s{self.seed}_'
+                    f'l{self.loss_mode}_n{self.n_samples}'
+                    f'_p{self.pos_encoding_mode}_'
+                    f'm{self.mask_scheduler}_s{self.sequence_length}'
+                ),
+            )
+            # true counts are stored in the 'counts' layer
+            true_adata = pred_adata.copy()
+            true_adata.X = true_adata.layers['counts']
+            # log norm and compute PCA
+            pred_adata = scale_pca(pred_adata)
+            true_adata = scale_pca(true_adata)
+            # scale pca
+            coords = true_adata.obsm['X_pca']
+            coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
+            true_adata.obsm['X_pca_scaled'] = coords
+            coords = pred_adata.obsm['X_pca']
+            coords = (coords - coords.mean(axis=0)) / coords.std(axis=0)
+            pred_adata.obsm['X_pca_scaled'] = coords
 
-            # # subsample 25k cells
-            # if pred_adata.shape[0] > 10000:
-            #     sc.pp.subsample(pred_adata, n_obs=10000, copy=False)
-            #     # use obs index to subsample true counts
-            #     true_adata = true_adata[pred_adata.obs.index]
-            # mmd_wasserstein = compute_distribution_distances(
-            #     torch.tensor(true_adata.obsm['X_pca_scaled']).float(),
-            #     torch.tensor(pred_adata.obsm['X_pca_scaled']).float(),
-            # )
-            # for metric in mmd_wasserstein:
-            #     metric_mean[metric + '_PCA'] = mmd_wasserstein[metric]
-            # emd_df = evaluate_emd(true_adata, pred_adata)
-            # self.log(
-            #     'test/emd',
-            #     emd_df['emd'].mean(),
-            #     on_epoch=True,
-            #     prog_bar=True,
-            #     logger=True,
-            # )
-
-            # print('---Metrics saved')
-            # if self.return_rouge_score:
-            #     if self.test_dict[f'rouge1_{self.rouge_seq_len_list[0]}']:
-            #         for seq_len in self.rouge_seq_len_list:
-            #             metric_mean[f'rouge1_{seq_len}'] = np.mean(
-            #                 self.test_dict[f'rouge1_{seq_len}']
-            #             )
-
-            # metrics = pd.DataFrame(metric_mean, index=[0])
-            # # add metrics on the gene space
-            # lin_reg_df = lin_reg_summary(true_adata, pred_adata)
-            # mmd_df = evaluate_mmd(true_adata, pred_adata, n_cells=10000)
-            # metrics = pd.concat([metrics, emd_df, lin_reg_df, mmd_df], axis=1)
-            # metrics.to_csv(
-            #     f'{self.output_dir}/{self.date}_p{self.pos_encoding_mode}_'
-            #     f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
-            #     f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
-            # )
+            # subsample 25k cells
+            if pred_adata.shape[0] > 10000:
+                sc.pp.subsample(pred_adata, n_obs=10000, copy=False)
+                # use obs index to subsample true counts
+                true_adata = true_adata[pred_adata.obs.index]

@@ -1336,8 +1336,8 @@ class CountDecoder(nn.Module):
         iterations: int = 18,  # optimal of iterations in MaskGIT
         mask_scheduler: str = 'cosine',
         sequence_length: int = 2048,
-        unique_gene_list: Optional[dict] = None,
-        shared_gene_list: Optional[dict] = None,
+        unique_gene_list: dict | None = None,
+        shared_gene_list: dict | None = None,
     ):
         '''
         Description:
@@ -1378,7 +1378,7 @@ class CountDecoder(nn.Module):
             ids = torch.full_like(tgt_input_id, self.mask_token, dtype=torch.long)
             # add cls token to the ids
             ids[:, 0] = tgt_input_id[:, 0]
-            ids[:, :sequence_length] = 0
+            ids[:, sequence_length:] = 0
             tgt_input_id_dict_[tgt_input_id_key] = ids
             # pad ids
             scores = torch.zeros_like(tgt_input_id, dtype=torch.float)
