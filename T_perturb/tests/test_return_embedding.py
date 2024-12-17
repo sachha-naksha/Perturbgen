@@ -183,6 +183,8 @@ class CellGenTestEmbeddingCase(unittest.TestCase):
         trainer.test(
             self.decoder_module,
             self.data_module,
-            ckpt_path='./T_perturb/T_perturb/tests/'
-            'checkpoints/baseline_masking_checkpoint-epoch=00.ckpt',
+            ckpt_path=(
+                'T_perturb/T_perturb/tests/checkpoints/'
+                'test_masking_checkpoint-epoch=00.ckpt'
+            ),
         )

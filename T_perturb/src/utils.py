@@ -730,6 +730,8 @@ def return_perturbation_adata(
         Directory to save files in
     file_name: `str`
         Filename for output file
+    mode: `Literal['inference', 'generation']`
+        Mode of test_step.
     Returns:
     --------
     adata: `~anndata.AnnData` \n
@@ -749,11 +751,11 @@ def return_perturbation_adata(
                 Array of true counts.
     """
     print('---Generating anndata')
-
     # adata.obsm
     cls_embeddings = torch.cat(test_dict['cls_embeddings']).numpy()
     cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
+    print('cosine_similarity', mean_cos_similarity.shape)
     # create dataframe to store perturbation results
     obsm_dict = {
         'cls_embeddings': cls_embeddings,
@@ -768,7 +770,10 @@ def return_perturbation_adata(
         }
         obsm_dict.update(rouge_dict)
     elif mode == 'inference':
-        pass
+        print(test_dict['delta_probs'])
+        delta_probs = torch.cat(test_dict['delta_probs']).numpy()
+        print('delta', delta_probs.shape)
+        obsm_dict['delta_probs'] = delta_probs
     else:
         raise ValueError(
             f'Invalid mode: {mode}.' 'Must be either generation or inference.'
@@ -782,7 +787,7 @@ def return_perturbation_adata(
         obs=test_obs,
         obsm=obsm_dict,
     )
-    adata.write_h5ad(os.path.join(output_dir, file_name))
+    # adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata
 

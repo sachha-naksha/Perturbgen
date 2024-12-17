@@ -123,7 +123,6 @@ class CellGenTrainer(LightningModule):
             return_attn=return_attn,
         )
         self.masking_loss = nn.CrossEntropyLoss()
-        self.timepoint_loss = nn.CrossEntropyLoss()
 
         self.weight_decay = weight_decay
         self.initial_lr = initial_lr

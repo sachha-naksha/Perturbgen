@@ -15,7 +15,6 @@ class PerturberInferenceTrainer(CellGenTrainer):
         self,
         genes_to_perturb: List[int] | None = None,
         perturbation_token: int | None = 0,
-        cell_type_to_perturb: str | None = None,
         perturbation_mode: List[str] | None = None,
         *args,
         **kwargs,
@@ -31,6 +30,7 @@ class PerturberInferenceTrainer(CellGenTrainer):
             self.perturbation_mode = []
         self.test_dict['cls_cosine_similarity'] = []
         self.test_dict['mean_cosine_similarity'] = []
+        self.test_dict['delta_probs'] = []
 
     def forward(
         self,
@@ -74,36 +74,71 @@ class PerturberInferenceTrainer(CellGenTrainer):
     def test_step(self, batch, *args, **kwargs):
         if self.return_embeddings:
             true_outputs = self.forward(batch, perturbation=False)
-
             perturbed_outputs = self.forward(batch, perturbation=True)
-            print('true', true_outputs.keys())
-            print('true', true_outputs)
-            print('perturbed', perturbed_outputs.keys())
+            print(true_outputs['dec_logits'].shape)
+            raise
 
             for t in self.pred_tps:
-                print('t', t)
-                print('true', true_outputs['dec_embedding'][t].shape)
                 true_cls = true_outputs['dec_embedding'][t][:, 0, :]
                 true_mean_cls = true_outputs['mean_embedding'][t]
+                print('true_cls', true_cls.shape)
+
+                true_logits = true_outputs['dec_logits'][t]
+                print('logits', true_logits.shape)
+                true_probs = torch.softmax(true_logits, dim=-1)
+                true_probs = true_probs.sum(dim=0)
+
                 perturbed_cls = perturbed_outputs['dec_embedding'][t][:, 0, :]
                 perturbed_mean_cls = perturbed_outputs['mean_embedding'][t]
 
+                perturbed_logits = perturbed_outputs['dec_logits'][t]
+                print('perturbed_logits', perturbed_logits.shape)
+                perturbed_probs = torch.softmax(perturbed_logits, dim=-1)
+                perturbed_probs = perturbed_probs.sum(dim=0)
+                print('perturbed_probs', perturbed_probs.shape)
+                delta_probs = perturbed_probs - true_probs
+                print('delta_probs', delta_probs.shape)
+                self.test_dict['delta_probs'].append(delta_probs)
+                print('length', len(self.test_dict['delta_probs']))
+
                 if len(self.perturbation_mode) > 0:
-                    cls_cos_sim = cosine_similarity(
+                    delta_cls_cos_sim = cosine_similarity(
                         perturbed_cls,
                         true_cls,
                     )
-                    print('cls_cos_sim', cls_cos_sim)
-                    mean_agg_cos_sim = cosine_similarity(
+                    print('cls_cos_sim', delta_cls_cos_sim)
+                    delta_mean_cos_sim = cosine_similarity(
                         perturbed_mean_cls,
                         true_mean_cls,
                     )
-                    print('mean_agg_cos_sim', mean_agg_cos_sim)
-                    self.test_dict['cls_cosine_similarity'].append(cls_cos_sim)
-                    self.test_dict['mean_cosine_similarity'].append(mean_agg_cos_sim)
+                    print('mean_agg_cos_sim', delta_mean_cos_sim)
+                    self.test_dict['cls_cosine_similarity'].append(delta_cls_cos_sim)
+                    self.test_dict['mean_cosine_similarity'].append(delta_mean_cos_sim)
+                    print('length', len(self.test_dict['cls_cosine_similarity']))
+                    cls_embeddings = true_cls.detach().cpu()
+
+                    self.test_dict['cls_embeddings'].append(cls_embeddings)
+
+                    # return obs_key
+                    self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
+                    if len(self.var_list) > 0:
+                        for var in self.var_list:
+                            self.test_dict[var].append(batch[f'{var}_t{t}'])
 
     def on_test_epoch_end(self):
-        pass
+        if self.return_embeddings:
+            obs_key = self.var_list if len(self.var_list) > 0 else []
+            obs_key.extend(['cell_idx'])
+            return_perturbation_adata(
+                test_dict=self.test_dict,
+                obs_key=obs_key,
+                output_dir=self.output_dir,
+                file_name=(
+                    f'{self.date}_prediction_embeddings'
+                    f't{self.pred_tps}_lr{self.end_lr}_w{self.weight_decay}'
+                ),
+                mode='inference',
+            )
 
 
 class PerturberGenerationTrainer(CountDecoderTrainer):

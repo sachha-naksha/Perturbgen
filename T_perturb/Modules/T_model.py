@@ -1120,7 +1120,7 @@ class CountDecoder(nn.Module):
         n_total_tps: int = 3,
         context_mode: bool = True,
         n_genes: int = 25426,
-        context_tps: Optional[list[int]] = None,
+        context_tps: list[int] | None = None,
     ):
         '''
         Description:
@@ -1334,7 +1334,7 @@ class CountDecoder(nn.Module):
         topk_filter_thres: float = 0.9,
         starting_temperature: float = 2.0,
         iterations: int = 18,
-        tgt_time_step: Optional[int] = 1,
+        tgt_time_step: int = 1,
     ):
         '''
         Description:

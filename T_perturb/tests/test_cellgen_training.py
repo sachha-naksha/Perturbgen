@@ -36,11 +36,13 @@ def dummy_dataset(
         input_ids = torch.tensor(input_ids_np, dtype=torch.long)
         input_ids[:, -10:] = 0
         cell_idx = np.arange(num_samples)
+        cell_type = np.random.choice(['A', 'B', 'C'], num_samples)
         dataset = Dataset.from_dict(
             {
                 'input_ids': input_ids,
+                'cell_type': cell_type,
                 'length': [len(input_ids)] * num_samples,
-                'cell_pairin_index': cell_idx,
+                'cell_pairing_index': cell_idx,
             }
         )
         return dataset
@@ -58,6 +60,7 @@ def dummy_dataset(
             tgt_dataset_dict[f'tgt_dataset_t{t+1}'] = Dataset.from_dict(
                 {
                     'input_ids': input_ids,
+                    'cell_type': np.random.choice(['A', 'B', 'C'], num_samples),
                     'length': [len(input_ids)] * num_samples,
                     'cell_pairing_index': np.random.choice(
                         100, num_samples, replace=False

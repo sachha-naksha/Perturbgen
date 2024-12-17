@@ -159,8 +159,8 @@ class CellGenTestTrainingCase(unittest.TestCase):
             conditions_combined = torch.tensor(conditions_combined, dtype=torch.long)
 
         decoder_module = CountDecoderTrainer(
-            ckpt_masking_path='./T_perturb/T_perturb/tests/'
-            'checkpoints/baseline_masking_checkpoint-epoch=00.ckpt',
+            ckpt_masking_path='T_perturb/T_perturb/tests/checkpoints/'
+            'test_masking_checkpoint-epoch=00.ckpt',
             tgt_vocab_size=self.tgt_vocab_size,
             d_model=self.d_model,
             num_heads=4,

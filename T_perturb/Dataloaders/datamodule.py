@@ -1,5 +1,4 @@
 import pickle
-from typing import Optional
 from warnings import warn
 
 import numpy as np
@@ -20,12 +19,12 @@ class CellGenDataset(Dataset):
         src_dataset: DatasetDict,
         tgt_datasets: DatasetDict,
         time_steps: list = [1, 2],
-        src_counts: Optional[np.ndarray] = None,
-        tgt_counts_dict: Optional[np.ndarray] = None,
-        split_indices: Optional[list] = None,
-        conditions: Optional[torch.Tensor] = None,
-        conditions_combined: Optional[torch.Tensor] = None,
-        condition_encodings: Optional[dict] = None,
+        src_counts: np.ndarray | None = None,
+        tgt_counts_dict: np.ndarray | None = None,
+        split_indices: list | None = None,
+        conditions: torch.Tensor | None = None,
+        conditions_combined: torch.Tensor | None = None,
+        condition_encodings: dict | None = None,
     ):
         super().__init__()
         self.src_dataset = src_dataset
@@ -62,6 +61,8 @@ class CellGenDataset(Dataset):
         if src_len != tgt_len:
             warn('src and tgt dataset have different length')
         self.dataset_length = min(src_len, tgt_len)
+        print('src_len', src_len)
+        print('tgt_len', tgt_len)
 
     def __getitem__(self, ind):
         out = {
@@ -99,17 +100,17 @@ class CellGenDataModule(LightningDataModule):
         split: bool = False,
         pred_tps: list = [1, 2],
         n_total_tps: int = 4,
-        src_counts: Optional[np.ndarray] = None,
-        tgt_counts_dict: Optional[np.ndarray] = None,
-        condition_keys: Optional[list] = None,
-        condition_encodings: Optional[dict] = None,
-        conditions: Optional[torch.Tensor] = None,
-        conditions_combined: Optional[torch.Tensor] = None,
-        train_indices: Optional[list[int]] = None,
-        val_indices: Optional[list[int]] = None,
-        test_indices: Optional[list[int]] = None,
-        var_list: Optional[list] = None,
-        context_tps: Optional[list] = None,
+        src_counts: np.ndarray | None = None,
+        tgt_counts_dict: np.ndarray | None = None,
+        condition_keys: list | None = None,
+        condition_encodings: dict | None = None,
+        conditions: torch.Tensor | None = None,
+        conditions_combined: torch.Tensor | None = None,
+        train_indices: list[int] | None = None,
+        val_indices: list[int] | None = None,
+        test_indices: list[int] | None = None,
+        var_list: list | None = None,
+        context_tps: list | None = None,
     ):
         """
         Description:

@@ -1,8 +1,4 @@
-from typing import (
-    Dict,
-    List,
-    Optional,
-)
+from typing import Dict, List
 
 import torch
 from einops import rearrange
@@ -140,7 +136,7 @@ class PerturberGeneration(CountDecoder):
         topk_filter_thres: float = 0.9,
         starting_temperature: float = 2.0,
         iterations: int = 18,
-        tgt_time_step: Optional[int] = 1,
+        tgt_time_step: int = 1,
         prompt_length: int = 1,
         genes_to_perturb: List | None = None,
     ):
