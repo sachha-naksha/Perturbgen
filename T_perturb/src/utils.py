@@ -223,8 +223,8 @@ def compute_cos_similarity(
     gene_embeddings: `torch.tensor`
     """
     # get cls position and dec_embedding (index = time_step-1)
-    dec_embedding = outputs['dec_embedding'][time_step]
-    cls_embeddings = outputs['mean_embedding'][time_step]
+    dec_embedding = outputs[time_step]['dec_embedding']
+    cls_embeddings = outputs[time_step]['mean_embedding']
     # exclude cls token from gene embeddings
     gene_embeddings = dec_embedding[:, 1:, :]
     cos_similarity = []
@@ -336,7 +336,7 @@ def return_attn_weights(
 
     # map self attention weights
     pad_token_id = torch.tensor(pad_token_id, device=token_ids.device)
-    self_attn_weights = outputs['self_attn_weights'][time_step]
+    self_attn_weights = outputs[time_step]['self_attn_weights']
     self_attn_weights = _map_attn_weights(
         attn_weights=self_attn_weights,
         tgt_mapping_dict=tgt_mapping_dict,
@@ -344,7 +344,7 @@ def return_attn_weights(
         pad_token_id=pad_token_id,
     )
     # map cross attention weights
-    cross_attn_weights = outputs['cross_attn_weights'][time_step]
+    cross_attn_weights = outputs[time_step]['cross_attn_weights']
     cross_attn_weights = _map_attn_weights(
         attn_weights=cross_attn_weights,
         src_mapping_dict=src_mapping_dict,

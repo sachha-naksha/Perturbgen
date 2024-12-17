@@ -75,46 +75,34 @@ class PerturberInferenceTrainer(CellGenTrainer):
         if self.return_embeddings:
             true_outputs = self.forward(batch, perturbation=False)
             perturbed_outputs = self.forward(batch, perturbation=True)
-            print(true_outputs['dec_logits'].shape)
-            raise
-
             for t in self.pred_tps:
-                true_cls = true_outputs['dec_embedding'][t][:, 0, :]
-                true_mean_cls = true_outputs['mean_embedding'][t]
-                print('true_cls', true_cls.shape)
+                true_cls = true_outputs[t]['dec_embedding'][:, 0, :]
+                true_mean_cls = true_outputs[t]['mean_embedding']
 
-                true_logits = true_outputs['dec_logits'][t]
-                print('logits', true_logits.shape)
+                true_logits = true_outputs[t]['dec_logits']
                 true_probs = torch.softmax(true_logits, dim=-1)
-                true_probs = true_probs.sum(dim=0)
+                true_probs = true_probs.sum(dim=1)
 
-                perturbed_cls = perturbed_outputs['dec_embedding'][t][:, 0, :]
-                perturbed_mean_cls = perturbed_outputs['mean_embedding'][t]
+                perturbed_cls = perturbed_outputs[t]['dec_embedding'][:, 0, :]
+                perturbed_mean_cls = perturbed_outputs[t]['mean_embedding']
 
-                perturbed_logits = perturbed_outputs['dec_logits'][t]
-                print('perturbed_logits', perturbed_logits.shape)
+                perturbed_logits = perturbed_outputs[t]['dec_logits']
                 perturbed_probs = torch.softmax(perturbed_logits, dim=-1)
-                perturbed_probs = perturbed_probs.sum(dim=0)
-                print('perturbed_probs', perturbed_probs.shape)
+                perturbed_probs = perturbed_probs.sum(dim=1)
                 delta_probs = perturbed_probs - true_probs
-                print('delta_probs', delta_probs.shape)
                 self.test_dict['delta_probs'].append(delta_probs)
-                print('length', len(self.test_dict['delta_probs']))
 
                 if len(self.perturbation_mode) > 0:
                     delta_cls_cos_sim = cosine_similarity(
                         perturbed_cls,
                         true_cls,
                     )
-                    print('cls_cos_sim', delta_cls_cos_sim)
                     delta_mean_cos_sim = cosine_similarity(
                         perturbed_mean_cls,
                         true_mean_cls,
                     )
-                    print('mean_agg_cos_sim', delta_mean_cos_sim)
                     self.test_dict['cls_cosine_similarity'].append(delta_cls_cos_sim)
                     self.test_dict['mean_cosine_similarity'].append(delta_mean_cos_sim)
-                    print('length', len(self.test_dict['cls_cosine_similarity']))
                     cls_embeddings = true_cls.detach().cpu()
 
                     self.test_dict['cls_embeddings'].append(cls_embeddings)

@@ -871,7 +871,6 @@ class CellGen(nn.Module):
             'cross_attn_weights': cross_attn_weights,
             'dec_logits': decoder_logits,
             'labels': labels,
-            'selected_time_step': time_random,
             'mean_embedding': mean_nonpadding_embs(embs=dec_embedding, pad=tgt_pad),
         }
         return outputs
@@ -984,10 +983,7 @@ class CellGen(nn.Module):
                 # MASKGIT generation
                 tgt_input_id_dict = generate_id_dict
                 sorted_time_steps = [tgt_time_step]
-        dec_embedding_dict = {}
-        mean_embedding_dict = {}
-        cross_attn_weights_dict = {}
-        self_attn_weights_dict = {}
+        all_outputs = {}
         for tgt_time_step in sorted_time_steps:
             tgt_pad = tgt_pad_dict[f'tgt_pad_t{tgt_time_step}']
             if tgt_input_id_dict is not None:
@@ -1029,18 +1025,8 @@ class CellGen(nn.Module):
                 time_random=tgt_time_step,
                 labels=labels,
             )
-            dec_embedding_dict[tgt_time_step] = outputs['dec_embedding']
-            mean_embedding_dict[tgt_time_step] = outputs['mean_embedding']
-            self_attn_weights_dict[tgt_time_step] = outputs['self_attn_weights']
-            cross_attn_weights_dict[tgt_time_step] = outputs['cross_attn_weights']
-        if len(sorted_time_steps) == 1:
-            outputs = outputs
-        else:
-            outputs['mean_embedding'] = mean_embedding_dict
-            outputs['dec_embedding'] = dec_embedding_dict
-            outputs['self_attn_weights'] = self_attn_weights_dict
-            outputs['cross_attn_weights'] = cross_attn_weights_dict
-        return outputs
+            all_outputs[tgt_time_step] = outputs
+        return all_outputs
 
 
 class CountHead(nn.Module):
@@ -1191,7 +1177,7 @@ class CountDecoder(nn.Module):
         )
         count_outputs = {}
         for _, t in enumerate(self.pred_tps):
-            cls_embedding = outputs['mean_embedding'][t]
+            cls_embedding = outputs[t]['mean_embedding']
             count_outputs_tmp = self.count_decoder.forward(cls_embedding)
             count_outputs[f'count_output_t{t}'] = count_outputs_tmp
 
@@ -1308,18 +1294,13 @@ class CountDecoder(nn.Module):
             )
             generate_id_dict[tgt_input_id_key] = generated_ids
 
-            cls_embedding = mean_nonpadding_embs(
-                embs=outputs['dec_embedding'],
-                pad=tgt_pad,
-            )
             # cls_embedding = outputs['dec_embedding'][:, 0, :]
             count_outputs[f'count_output_t{time_step}'] = self.count_decoder.forward(
-                cls_embedding
+                outputs[time_step]['mean_embedding']
             )
-            count_outputs[f'cls_embedding_t{time_step}'] = outputs['dec_embedding'][
-                :, 0, :
-            ]
-            count_outputs[f'mean_embedding_t{time_step}'] = outputs['mean_embedding']
+            count_outputs[f'cls_embedding_t{time_step}'] = outputs[time_step][
+                'dec_embedding'
+            ][:, 0, :]
         return count_outputs, generate_id_dict
 
     def generate_sequence(
@@ -1428,7 +1409,7 @@ class CountDecoder(nn.Module):
                 tgt_time_step=tgt_time_step,
                 context_mode=self.context_mode,
             )
-            logits = outputs['dec_logits'][:, 1:, :]
+            logits = outputs[tgt_time_step]['dec_logits'][:, 1:, :]
 
             # exclude cls token
             tmp_ids_ = tmp_ids[:, 1:].clone()

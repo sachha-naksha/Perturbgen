@@ -151,8 +151,9 @@ class CellGenTestTrainingCase(unittest.TestCase):
         batch = next(iter(self.data_module.train_dataloader()))
         output = self.transformer(batch)
         print('batch completed')
+        t = list(output.keys())[0]
         self.assertEqual(
-            output['dec_embedding'].shape,
+            output[t]['dec_embedding'].shape,
             (
                 self.batch_size,
                 self.max_seq_length + 1,  # +1 for cls token

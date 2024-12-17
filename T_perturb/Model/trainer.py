@@ -266,12 +266,64 @@ class CellGenTrainer(LightningModule):
             logger=True,
         )
         outputs = self.forward(batch)
-        dec_logits = outputs['dec_logits']
-        labels = outputs['labels']
-        with torch.no_grad():
-            perp = self.perplexity(dec_logits, labels)
+        for t in outputs.keys():
+            dec_logits = outputs[t]['dec_logits']
+            labels = outputs[t]['labels']
+            with torch.no_grad():
+                perp = self.perplexity(dec_logits, labels)
+                self.log(
+                    'train/perplexity',
+                    perp,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=True,
+                    logger=True,
+                    batch_size=batch['tgt_input_ids_t1'].shape[0],
+                    rank_zero_only=True,
+                    sync_dist=True,
+                )
+            dec_logits = dec_logits.contiguous().view(-1, dec_logits.size(-1))
+            labels = labels.contiguous().view(-1)
+            masking_loss = self.masking_loss(dec_logits, labels)
             self.log(
-                'train/perplexity',
+                'train/masking_loss',
+                masking_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                batch_size=batch['tgt_input_ids_t1'].shape[0],
+                rank_zero_only=True,
+                sync_dist=True,
+            )
+            return masking_loss
+
+    def on_train_epoch_end(self):
+        pass
+
+    def validation_step(self, batch, *args, **kwargs):
+        outputs = self.forward(batch)
+        for t in outputs.keys():
+            dec_logits = outputs[t]['dec_logits']
+            labels = outputs[t]['labels']
+            perp = self.perplexity(dec_logits, labels)
+            dec_logits = dec_logits.contiguous().view(-1, dec_logits.size(-1))
+            labels = labels.contiguous().view(-1)
+            masking_loss = self.masking_loss(dec_logits, labels)
+
+            self.log(
+                'val/loss',
+                masking_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                batch_size=batch['tgt_input_ids_t1'].shape[0],
+                rank_zero_only=True,
+                sync_dist=True,
+            )
+            self.log(
+                'val/perplexity',
                 perp,
                 on_step=True,
                 on_epoch=True,
@@ -281,57 +333,7 @@ class CellGenTrainer(LightningModule):
                 rank_zero_only=True,
                 sync_dist=True,
             )
-        dec_logits = dec_logits.contiguous().view(-1, dec_logits.size(-1))
-        labels = labels.contiguous().view(-1)
-        masking_loss = self.masking_loss(dec_logits, labels)
-        self.log(
-            'train/masking_loss',
-            masking_loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=batch['tgt_input_ids_t1'].shape[0],
-            rank_zero_only=True,
-            sync_dist=True,
-        )
-        return masking_loss
-
-    def on_train_epoch_end(self):
-        pass
-
-    def validation_step(self, batch, *args, **kwargs):
-        outputs = self.forward(batch)
-        dec_logits = outputs['dec_logits']
-        labels = outputs['labels']
-        perp = self.perplexity(dec_logits, labels)
-        dec_logits = dec_logits.contiguous().view(-1, dec_logits.size(-1))
-        labels = labels.contiguous().view(-1)
-        masking_loss = self.masking_loss(dec_logits, labels)
-
-        self.log(
-            'val/loss',
-            masking_loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=batch['tgt_input_ids_t1'].shape[0],
-            rank_zero_only=True,
-            sync_dist=True,
-        )
-        self.log(
-            'val/perplexity',
-            perp,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            batch_size=batch['tgt_input_ids_t1'].shape[0],
-            rank_zero_only=True,
-            sync_dist=True,
-        )
-        return masking_loss
+            return masking_loss
 
     def test_step(self, batch, *args, **kwargs):
         if self.return_embeddings:
@@ -369,7 +371,7 @@ class CellGenTrainer(LightningModule):
                 # take the non zero mean of the gene embeddings
                 gene_embeddings = return_gene_embeddings(
                     # marker_genes=marker_genes,
-                    gene_embeddings=outputs['dec_embedding'][t][:, 1:, :],
+                    gene_embeddings=outputs[t]['dec_embedding'][:, 1:, :],
                     mapping_dict=(
                         self.gene_to_rowid if self.gene_to_rowid is not None else None
                     ),
@@ -411,7 +413,7 @@ class CellGenTrainer(LightningModule):
                 gene_embeddings = gene_embeddings.detach().cpu()
                 gene_embeddings = gene_embeddings.to(torch.float16)
                 true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
-                cls_embeddings = outputs['mean_embedding'][t].detach().cpu()
+                cls_embeddings = outputs[t]['mean_embedding'].detach().cpu()
                 # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
                 self.test_dict['true_counts'].append(true_counts)
