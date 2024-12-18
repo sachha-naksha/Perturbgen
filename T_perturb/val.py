@@ -474,7 +474,6 @@ def main() -> None:
         'pos_encoding_mode': args.pos_encoding_mode,
         'output_dir': args.output_dir,
         'encoder': args.encoder,
-        'context_mode': args.context_mode,
         'var_list': args.var_list,
     }
     if args.test_mode == 'masking':
@@ -483,6 +482,7 @@ def main() -> None:
         test_kwargs['return_embeddings'] = args.return_embeddings
         test_kwargs['mapping_dict_path'] = args.mapping_dict_path
         test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
+        test_kwargs['context_mode'] = args.context_mode
         test_kwargs['return_attn'] = args.return_attn
         pretrained_module = CellGenTrainer(**test_kwargs)
 

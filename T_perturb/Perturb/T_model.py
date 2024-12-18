@@ -5,16 +5,16 @@ from einops import rearrange
 from torch import nn
 from tqdm import tqdm
 
-from T_perturb.Modules.T_model import CountDecoder
+from T_perturb.Modules.T_model import CellGen
 from T_perturb.src.utils import (
+    generate_pad,
     gumbel_sample,
-    mean_nonpadding_embs,
     noise_schedule,
     top_k,
 )
 
 
-class PerturberGeneration(CountDecoder):
+class PerturberMasking(CellGen):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -40,6 +40,14 @@ class PerturberGeneration(CountDecoder):
 
         Parameters:
         -----------
+        src_input_id: `torch.Tensor`
+            Source token input.
+        tgt_input_id_dict: `dict`
+            Dictionary of target token inputs from different time steps.
+        max_len: `int`
+            Maximum length of the generated sequence.
+        can_remask_prev_masked: `bool`
+            Whether to remask previously masked tokens.
         topk_filter_thres: `float`
             Top-k filter threshold based on the logits.
         temperature: `float`
@@ -49,6 +57,12 @@ class PerturberGeneration(CountDecoder):
         mask_scheduler: `str`
             Mask scheduler function.
             Options: ['uniform', 'pow', 'cosine', 'log', 'exp']
+        sequence_length: `int`
+            Maximum length of the generated sequence.
+        genes_to_perturb: `List`
+            List of genes to perturb.
+        prompt_length: `int`
+            Length of the prompt to be used for generation.
 
         Returns:
         --------
@@ -58,15 +72,13 @@ class PerturberGeneration(CountDecoder):
             - 'cls_embedding_t{t}': CLS token embeddings for time step t.
         '''
         generate_id_dict: Dict[str, torch.Tensor] = {}
-        count_outputs: Dict[str, torch.Tensor] = {}
+        # all_outputs: Dict[str, torch.Tensor] = {}
         if self.context_tps is not None:
             all_modelling_tps = self.pred_tps + self.context_tps
             all_modelling_tps = sorted(list(set(all_modelling_tps)))
         else:
             all_modelling_tps = sorted(self.pred_tps)
-        tgt_pad_dict = self.call_padding(
-            src_input_id, tgt_input_id_dict, all_modelling_tps
-        )
+        tgt_pad_dict = self.call_padding(tgt_input_id_dict, all_modelling_tps)
         # filter tgt_input_id_dict to include only all_modelling_tps
         tgt_input_id_dict = {
             k: v
@@ -79,7 +91,7 @@ class PerturberGeneration(CountDecoder):
             pad_tensor = torch.ones_like(tgt_pad_dict_[f'tgt_pad_t{time_step}'])
             # predict the first n genes in first iteration
             pad_tensor[:, sequence_length:] = 0
-            tgt_pad = self.generate_pad(pad_tensor)
+            tgt_pad = generate_pad(pad_tensor)
             tgt_pad_dict_[f'tgt_pad_t{time_step}'] = tgt_pad
             tgt_input_id_key = f'tgt_input_ids_t{time_step}'
             tgt_input_id = tgt_input_id_dict[tgt_input_id_key]
@@ -96,7 +108,7 @@ class PerturberGeneration(CountDecoder):
                 generate_id_dict=tgt_input_id_dict_,
                 generate_pad_dict=tgt_pad_dict_,
                 src_input_id=src_input_id,
-                demask_fn=self.pretrained_model,
+                demask_fn=self,
                 mask_scheduler=mask_scheduler,
                 can_remask_prev_masked=can_remask_prev_masked,
                 topk_filter_thres=topk_filter_thres,
@@ -107,22 +119,9 @@ class PerturberGeneration(CountDecoder):
                 prompt_length=prompt_length,
                 genes_to_perturb=genes_to_perturb,
             )
-
             generate_id_dict[tgt_input_id_key] = generated_ids
 
-            cls_embedding = mean_nonpadding_embs(
-                embs=outputs['dec_embedding'],
-                pad=tgt_pad,
-            )
-            # cls_embedding = outputs['dec_embedding'][:, 0, :]
-            count_outputs[f'count_output_t{time_step}'] = self.count_decoder.forward(
-                cls_embedding
-            )
-            count_outputs[f'cls_embedding_t{time_step}'] = outputs['dec_embedding'][
-                :, 0, :
-            ]
-            count_outputs[f'mean_embedding_t{time_step}'] = outputs['mean_embedding']
-        return count_outputs, generate_id_dict
+        return outputs, generate_id_dict
 
     def generate_sequence(
         self,
@@ -230,9 +229,8 @@ class PerturberGeneration(CountDecoder):
                 generate_pad_dict=generate_pad_dict,
                 not_masked=False,
                 tgt_time_step=tgt_time_step,
-                context_mode=self.context_mode,
             )
-            logits = outputs['dec_logits'][:, prompt_length:, :]
+            logits = outputs[tgt_time_step]['dec_logits'][:, prompt_length:, :]
 
             if genes_to_perturb is not None:
                 # exclude genes_to_perturb from the option to be selected

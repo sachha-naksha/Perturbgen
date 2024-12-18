@@ -153,7 +153,7 @@ def get_args():
     parser.add_argument(
         '--cellgen_lr', type=float, default=0.0001, help='learning rate'
     )
-    
+
     parser.add_argument('--count_lr', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--cellgen_wd', type=float, default=0.0001, help='weight decay')
     parser.add_argument('--count_wd', type=float, default=0.01, help='weight decay')
@@ -374,7 +374,6 @@ def main() -> None:
         'n_total_tps': n_total_tps,
         'encoder': args.encoder,
         'output_dir': args.output_dir,
-        'context_mode': args.context_mode,
         'pos_encoding_mode': args.pos_encoding_mode,
     }
     if args.train_mode == 'masking':
@@ -383,6 +382,7 @@ def main() -> None:
         trainer_kwargs['end_lr'] = args.cellgen_lr
         trainer_kwargs['weight_decay'] = args.cellgen_wd
         trainer_kwargs['mapping_dict_path'] = args.mapping_dict_path
+        trainer_kwargs['context_mode'] = args.context_mode
         pretrained_module = CellGenTrainer(**trainer_kwargs)
     elif args.train_mode == 'count':
         trainer_kwargs['ckpt_masking_path'] = args.ckpt_masking_path

@@ -214,7 +214,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
 
     def test_countdecoder_forward(self):
         batch = next(iter(self.data_module.train_dataloader()))
-        output = self.decoder_module(batch)
+        output, _ = self.decoder_module(batch)
         self.assertEqual(
             len(output.keys()),
             self.n_total_tps,

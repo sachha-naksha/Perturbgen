@@ -101,7 +101,6 @@ class CellGenTrainer(LightningModule):
         super().__init__()
         self.save_hyperparameters()
         set_matmul_precision_for_device(precision)
-        print('start training')
         if context_tps is None:
             context_tps = pred_tps
         self.context_tps = context_tps
@@ -202,9 +201,10 @@ class CellGenTrainer(LightningModule):
             os.makedirs(self.output_dir)
         self.date = datetime.now().strftime('%Y%m%d-%H:%M')
         self.return_attn = return_attn
+        self.mask_scheduler = mask_scheduler
 
     def forward(self, batch):
-        self.tgt_input_id_dict = {}
+        tgt_input_id_dict = {}
         for i in self.pred_tps:
             tgt_input_id_ = torch.cat(
                 (
@@ -215,14 +215,13 @@ class CellGenTrainer(LightningModule):
                 ),
                 dim=1,
             )
-            self.tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         outputs = self.transformer(
             src_input_id=batch['src_input_ids'],
-            tgt_input_id_dict=self.tgt_input_id_dict,
+            tgt_input_id_dict=tgt_input_id_dict,
             not_masked=self.return_embeddings,
-            context_mode=self.context_mode,
         )
-        return outputs
+        return outputs, tgt_input_id_dict
 
     def configure_optimizers(self):
         parameters = [{'params': self.transformer.parameters(), 'lr': self.initial_lr}]
@@ -265,7 +264,7 @@ class CellGenTrainer(LightningModule):
             prog_bar=True,
             logger=True,
         )
-        outputs = self.forward(batch)
+        outputs, _ = self.forward(batch)
         for t in outputs.keys():
             dec_logits = outputs[t]['dec_logits']
             labels = outputs[t]['labels']
@@ -337,10 +336,10 @@ class CellGenTrainer(LightningModule):
 
     def test_step(self, batch, *args, **kwargs):
         if self.return_embeddings:
-            outputs = self.forward(batch)
+            outputs, tgt_input_id_dict = self.forward(batch)
 
             for t in self.pred_tps:
-                token_ids = self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
+                token_ids = tgt_input_id_dict[f'tgt_input_ids_t{t}']
                 # 1. compute cosine similarity
                 cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
                 # load marker genes
@@ -383,10 +382,7 @@ class CellGenTrainer(LightningModule):
                     # extract context_ids
                     context_ids = [batch['src_input_ids']]
                     context_ids.extend(
-                        [
-                            self.tgt_input_id_dict[f'tgt_input_ids_t{t}']
-                            for t in context_tps
-                        ]
+                        [tgt_input_id_dict[f'tgt_input_ids_t{t}'] for t in context_tps]
                     )
                     self_attn_weights, cross_attn_weights = return_attn_weights(
                         outputs=outputs,
@@ -498,7 +494,6 @@ class CountDecoderTrainer(LightningModule):
             './T_perturb/Geneformer/geneformer/' 'token_dictionary_gc95M.pkl'
         ),
         seed: int = 42,
-        context_mode: bool = True,
         n_genes: int = 25426,
         pos_encoding_mode: Literal[
             'time_pos_sin', 'comb_sin', 'sin_learnt'
@@ -563,7 +558,6 @@ class CountDecoderTrainer(LightningModule):
             dropout=dropout,
             pred_tps=pred_tps,
             context_tps=context_tps,
-            context_mode=context_mode,
             n_genes=n_genes,
         )
         if ckpt_count_path is not None:
@@ -646,25 +640,32 @@ class CountDecoderTrainer(LightningModule):
         self.unique_gene_list = unique_gene_list
         self.shared_gene_list = shared_gene_list
 
-    def forward(self, batch):
+    def forward(self, batch, generate: bool = False):
         tgt_input_id_dict = {}
-        for i in self.pred_tps:
+        if generate:
+            time_points = self.total_tps
+        else:
+            time_points = self.pred_tps
+        for t in time_points:
             tgt_input_id_ = torch.cat(
                 (
-                    getattr(self, f'cls_token_{str(i)}').expand(
-                        batch[f'tgt_input_ids_t{i}'].shape[0], -1
+                    getattr(self, f'cls_token_{str(t)}').expand(
+                        batch[f'tgt_input_ids_t{t}'].shape[0], -1
                     ),
-                    batch[f'tgt_input_ids_t{i}'],
+                    batch[f'tgt_input_ids_t{t}'],
                 ),
                 dim=1,
             )
-            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
-        outputs = self.decoder(
-            src_input_id=batch['src_input_ids'],
-            tgt_input_id_dict=tgt_input_id_dict,
-        )
+            tgt_input_id_dict[f'tgt_input_ids_t{t}'] = tgt_input_id_
+        if generate:
+            outputs = None
+        else:
+            outputs = self.decoder(
+                src_input_id=batch['src_input_ids'],
+                tgt_input_id_dict=tgt_input_id_dict,
+            )
 
-        return outputs
+        return outputs, tgt_input_id_dict
 
     def one_hot_encoder(
         self,
@@ -916,7 +917,7 @@ class CountDecoderTrainer(LightningModule):
     #     return test_dict, rouge_score
 
     def training_step(self, batch, *args, **kwargs):
-        outputs = self.forward(batch)
+        outputs, _ = self.forward(batch)
         count_loss, pred_counts_dict = self.compute_count_loss(outputs, batch)
         self.log(
             'train/loss',
@@ -965,7 +966,7 @@ class CountDecoderTrainer(LightningModule):
             self.train_pred_counts_list = []
 
     def validation_step(self, batch, *args, **kwargs):
-        outputs = self.forward(batch)
+        outputs, _ = self.forward(batch)
         count_loss, pred_counts_dict = self.compute_count_loss(
             outputs,
             batch,
@@ -1016,19 +1017,10 @@ class CountDecoderTrainer(LightningModule):
         self.val_pred_counts_list = []
 
     def test_step(self, batch, *args, **kwargs):
-        tgt_input_id_dict = {}
-        for i in self.total_tps:
-            print(i)
-            tgt_input_id_ = torch.cat(
-                (
-                    getattr(self, f'cls_token_{str(i)}').expand(
-                        batch[f'tgt_input_ids_t{i}'].shape[0], -1
-                    ),
-                    batch[f'tgt_input_ids_t{i}'],
-                ),
-                dim=1,
-            )
-            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
+        outputs, tgt_input_id_dict = self.forward(
+            batch,
+            generate=self.generate,
+        )
         if self.generate:
             decoder_kwargs = {
                 'src_input_id': batch['src_input_ids'],
@@ -1040,18 +1032,10 @@ class CountDecoderTrainer(LightningModule):
                 'iterations': self.iterations,
                 'sequence_length': self.sequence_length,
             }
-            if (self.unique_gene_list is not None) or (
-                self.shared_gene_list is not None
-            ):
-                decoder_kwargs['unique_gene_list'] = self.unique_gene_list
-                decoder_kwargs['shared_gene_list'] = self.shared_gene_list
-                outputs, pred_ids_dict = self.decoder.guided_generate(
-                    **decoder_kwargs,
-                )
-            else:
-                outputs, pred_ids_dict = self.decoder.generate(
-                    **decoder_kwargs,
-                )
+
+            outputs, pred_ids_dict = self.decoder.generate_counts(
+                **decoder_kwargs,
+            )
             # print(pred_ids_dict)
 
             for time_step in pred_ids_dict.keys():
@@ -1106,7 +1090,6 @@ class CountDecoderTrainer(LightningModule):
                 cls_embeddings = outputs[f'cls_embedding_t{time_step}'].detach().cpu()
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
         else:
-            outputs = self.forward(batch)
             count_loss, pred_count = self.compute_count_loss(
                 outputs,
                 batch,

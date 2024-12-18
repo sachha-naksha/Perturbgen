@@ -606,8 +606,9 @@ class CellGen(nn.Module):
             'time_pos_sin', 'comb_sin', 'sin_learnt', 'time_pos_learnt'
         ] = 'time_pos_sin',
         return_attn: bool = False,
-        context_tps: Optional[List[int]] = None,
         pad_token: int = 0,
+        context_mode: bool = True,
+        context_tps: List[int] | None = None,
     ):
         '''
         Description:
@@ -635,8 +636,6 @@ class CellGen(nn.Module):
         pre_tps: `list`
             List of time steps for training and testing.
             the proportion of tokens to mask.
-        context_tps: `list`
-            List of context time steps.
         n_total_tps: `int`
             Total number of target time steps.
         mask_scheduler: `str`
@@ -646,6 +645,11 @@ class CellGen(nn.Module):
         pos_encoding_mode:
             Literal['time_pos_sin', 'comb_sin', 'sin_learnt', 'time_pos_learnt']
             Positional encoding type.
+        context_mode: `bool`
+            Whether to use context mode, where other time steps are used as context.
+        context_tps: `list`
+            List of context time steps.
+
         Returns:
         --------
         outputs: `dict`
@@ -715,6 +719,8 @@ class CellGen(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.mask_scheduler = mask_scheduler
 
+        self.context_mode = context_mode
+
     def generate_mask(
         self,
         tgt_input_id,
@@ -742,7 +748,7 @@ class CellGen(nn.Module):
             MASKGIT: mask tokens based on the mask scheduler.
         mask_scheduler: `str`
             Masking scheduler defining
-            the proportion of tokens to mask for MASKGIT.
+            the proportion of tokens to mask for MASKGIT
 
         Returns:
         --------
@@ -927,11 +933,10 @@ class CellGen(nn.Module):
         self,
         src_input_id: torch.Tensor,
         not_masked: bool = False,
-        context_mode: bool = True,
-        tgt_time_step: Optional[int] = None,
-        tgt_input_id_dict: Optional[dict] = None,
-        generate_id_dict: Optional[dict] = None,
-        generate_pad_dict: Optional[dict] = None,
+        tgt_time_step: int | None = None,
+        tgt_input_id_dict: dict | None = None,
+        generate_id_dict: dict | None = None,
+        generate_pad_dict: dict | None = None,
     ):
         '''
         Description:
@@ -945,8 +950,6 @@ class CellGen(nn.Module):
             Whether to mask tokens. Should not be masked for testing and generation.
         tgt_time_step: `int`
             Target time step.
-        context_mode: `bool`
-            Whether to use context mode, where other time steps are used as context.
         tgt_input_id_dict: `Optional[dict]`
             Dictionary of target token inputs from different time steps.
         generate_id_dict: `Optional[dict]`
@@ -992,7 +995,7 @@ class CellGen(nn.Module):
                 raise ValueError(
                     'tgt_input_id_dict or generate_id_dict must be provided'
                 )
-            if context_mode:
+            if self.context_mode:
                 # distinction between selected time step and rest time steps
                 context_output, context_mask = self.generate_context(
                     enc_output=enc_output,
@@ -1018,8 +1021,10 @@ class CellGen(nn.Module):
             tgt_embedding = self.pos_embedding(tgt_embedding, tgt_time_step)
             # does not include any context
             outputs = self.call_decoder(
-                enc_output=context_output if context_mode else enc_output,
-                src_attention_mask=context_mask if context_mode else src_attention_mask,
+                enc_output=context_output if self.context_mode else enc_output,
+                src_attention_mask=context_mask
+                if self.context_mode
+                else src_attention_mask,
                 dec_embedding=tgt_embedding,
                 tgt_pad=tgt_pad,
                 time_random=tgt_time_step,
@@ -1027,169 +1032,6 @@ class CellGen(nn.Module):
             )
             all_outputs[tgt_time_step] = outputs
         return all_outputs
-
-
-class CountHead(nn.Module):
-    def __init__(
-        self,
-        loss_mode: str = 'zinb',
-        n_genes: int = 25426,
-        d_model: int = 256,  # 256
-        dropout: float = 0.0,
-    ):
-        '''
-        Description:
-        ------------
-        Count prediction head for the Seq2Seq model.
-        Parameters:
-        -----------
-        loss_mode: `str`
-            Loss mode. Options: ['mse', 'zinb', 'nb']
-        n_genes: `int`
-            number of genes to be predicted.
-        d_model: `int`
-            Token embedding dimension.
-        dropout: `float`
-            Dropout rate for the MLP.
-        Returns:
-        --------
-        count_outputs: `dict`
-            Output dictionary containing the following keys:
-            - 'count_lognorm': Log-normalized count prediction for MSE loss.
-            - 'count_mean': Mean count prediction for ZINB and NB loss.
-            - 'count_dropout': Dropout count prediction for ZINB loss.
-        '''
-        super(CountHead, self).__init__()
-        self.loss_mode = loss_mode
-
-        self.mlp = Mlp(
-            in_features=d_model,
-            hidden_features=d_model,
-            drop=dropout,
-        )
-        if self.loss_mode == 'mse':
-            self.relu_output = nn.Sequential(nn.Linear(d_model, n_genes), nn.ReLU())
-        elif self.loss_mode == 'zinb':
-            self.linear_output = nn.Linear(d_model, n_genes)
-            self.softmax_output = nn.Sequential(
-                nn.Linear(d_model, n_genes), nn.Softmax(dim=-1)
-            )
-        elif self.loss_mode == 'nb':
-            self.softmax_output = nn.Sequential(
-                nn.Linear(d_model, n_genes), nn.Softmax(dim=-1)
-            )
-
-    def forward(self, x):
-        # use cls token for count prediction
-        count_outputs = {}
-        mlp_output = self.mlp(x)
-        mlp_output = nn.functional.normalize(mlp_output, dim=-1, p=2)
-        if self.loss_mode == 'mse':
-            count_outputs['count_lognorm'] = self.relu_output(mlp_output)
-        elif self.loss_mode == 'zinb':
-            count_outputs['count_mean'] = self.softmax_output(mlp_output)
-            count_outputs['count_dropout'] = self.linear_output(mlp_output)
-        elif self.loss_mode == 'nb':
-            count_outputs['count_mean'] = self.softmax_output(mlp_output)
-        return count_outputs
-
-
-class CountDecoder(nn.Module):
-    def __init__(
-        self,
-        pretrained_model: nn.Module = None,
-        loss_mode: str = 'zinb',
-        d_model: int = 128,
-        add_mask_id: bool = True,
-        dropout: float = 0.0,
-        pred_tps: list = [1, 2],
-        n_total_tps: int = 3,
-        context_mode: bool = True,
-        n_genes: int = 25426,
-        context_tps: list[int] | None = None,
-    ):
-        '''
-        Description:
-        ------------
-        Loads complete Seq2Seq model with count prediction head.
-        Weights from pretrained seq2seq model are loaded into the model.
-        Use CLS or mean embeddings for count prediction.
-        Parameters:
-        -----------
-        pretrained_model: `nn.Module`
-            Pretrained Seq2Seq model.
-        loss_mode: `str`
-            Loss mode. Options: ['mse', 'zinb', 'nb']
-        d_model: `int`
-            Token embedding dimension.
-        add_mask_id: `bool`
-            Whether to add mask token.
-        dropout: `float`
-            Dropout rate for the MLP.
-        pred_tps: `list`
-            List of time steps for training and testing.
-        context_tps: `list`
-            List of context time steps.
-        n_total_tps: `int`
-            Total number of target time steps.
-        context_mode: `bool`
-            Whether to use context mode, where other time steps are used as context.
-        n_genes: `int`
-            Number of genes which counts should be regressed.
-        Returns:
-        --------
-        count_outputs: `dict`
-            Output dictionary containing the following keys:
-            - 'count_output_t{t}': Count prediction for time step t.
-            - 'count_log_norm': Log-normalized count prediction for MSE loss.
-            - 'count_mean': Mean count prediction for ZINB and NB loss.
-            - 'count_dropout': Dropout count prediction for ZINB loss.
-        '''
-        super(CountDecoder, self).__init__()
-        self.pretrained_model = pretrained_model
-        self.embed_dim = d_model
-
-        self.loss_mode = loss_mode
-        self.count_decoder = CountHead(loss_mode, n_genes, d_model, dropout)
-        if add_mask_id:
-            self.mask_token = 1
-
-        self.pred_tps = pred_tps
-        self.context_tps = context_tps
-        self.total_tps = list(range(1, n_total_tps + 1))
-        self.cls_embedding = None
-        self.context_mode = context_mode
-
-    def generate_pad(self, tgt):
-        tgt_pad = tgt == 0
-        return tgt_pad
-
-    def forward(
-        self,
-        src_input_id: torch.Tensor,
-        tgt_input_id_dict: dict,
-    ):
-        outputs = self.pretrained_model(
-            src_input_id=src_input_id,
-            tgt_input_id_dict=tgt_input_id_dict,
-            not_masked=True,
-            context_mode=self.context_mode,
-        )
-        count_outputs = {}
-        for _, t in enumerate(self.pred_tps):
-            cls_embedding = outputs[t]['mean_embedding']
-            count_outputs_tmp = self.count_decoder.forward(cls_embedding)
-            count_outputs[f'count_output_t{t}'] = count_outputs_tmp
-
-        return count_outputs
-
-    def call_padding(self, src_input_id, tgt_input_id_dict, time_steps):
-        tgt_pad_dict = {}
-        tgt_pad_dict['src_pad'] = self.generate_pad(src_input_id)
-        for time_step in time_steps:
-            tgt_input_id = tgt_input_id_dict[f'tgt_input_ids_t{time_step}']
-            tgt_pad_dict[f'tgt_pad_t{time_step}'] = self.generate_pad(tgt_input_id)
-        return tgt_pad_dict
 
     def generate(
         self,
@@ -1242,14 +1084,15 @@ class CountDecoder(nn.Module):
             - 'generate_id_dict': Dictionary of generated token ids.
         '''
         generate_id_dict: Dict[str, torch.Tensor] = {}
-        count_outputs: Dict[str, torch.Tensor] = {}
+        # all_outputs: Dict[str, torch.Tensor] = {}
         if self.context_tps is not None:
             all_modelling_tps = self.pred_tps + self.context_tps
             all_modelling_tps = sorted(list(set(all_modelling_tps)))
         else:
             all_modelling_tps = sorted(self.pred_tps)
         tgt_pad_dict = self.call_padding(
-            src_input_id, tgt_input_id_dict, all_modelling_tps
+            tgt_input_id_dict,
+            all_modelling_tps,
         )
         # filter tgt_input_id_dict to include only all_modelling_tps
         tgt_input_id_dict = {
@@ -1264,7 +1107,7 @@ class CountDecoder(nn.Module):
             pad_tensor = torch.ones_like(tgt_pad_dict_[f'tgt_pad_t{time_step}'])
             # pass sequence length for generation
             pad_tensor[:, sequence_length:] = 0
-            tgt_pad = self.generate_pad(pad_tensor)
+            tgt_pad = generate_pad(pad_tensor)
             tgt_pad_dict_[f'tgt_pad_t{time_step}'] = tgt_pad
             tgt_input_id_key = f'tgt_input_ids_t{time_step}'
             tgt_input_id = tgt_input_id_dict[tgt_input_id_key]
@@ -1283,7 +1126,7 @@ class CountDecoder(nn.Module):
                 generate_id_dict=tgt_input_id_dict_,
                 generate_pad_dict=tgt_pad_dict_,
                 src_input_id=src_input_id,
-                demask_fn=self.pretrained_model,
+                demask_fn=self,
                 mask_scheduler=mask_scheduler,
                 can_remask_prev_masked=can_remask_prev_masked,
                 topk_filter_thres=topk_filter_thres,
@@ -1293,15 +1136,7 @@ class CountDecoder(nn.Module):
                 tgt_time_step=time_step,
             )
             generate_id_dict[tgt_input_id_key] = generated_ids
-
-            # cls_embedding = outputs['dec_embedding'][:, 0, :]
-            count_outputs[f'count_output_t{time_step}'] = self.count_decoder.forward(
-                outputs[time_step]['mean_embedding']
-            )
-            count_outputs[f'cls_embedding_t{time_step}'] = outputs[time_step][
-                'dec_embedding'
-            ][:, 0, :]
-        return count_outputs, generate_id_dict
+        return outputs, generate_id_dict
 
     def generate_sequence(
         self,
@@ -1407,7 +1242,6 @@ class CountDecoder(nn.Module):
                 generate_pad_dict=generate_pad_dict,
                 not_masked=False,
                 tgt_time_step=tgt_time_step,
-                context_mode=self.context_mode,
             )
             logits = outputs[tgt_time_step]['dec_logits'][:, 1:, :]
 
@@ -1438,3 +1272,181 @@ class CountDecoder(nn.Module):
             scores[:, 1:] = scores_
             tmp_ids[:, 1:] = tmp_ids_
         return outputs, tmp_ids
+
+
+class CountHead(nn.Module):
+    def __init__(
+        self,
+        loss_mode: str = 'zinb',
+        n_genes: int = 25426,
+        d_model: int = 256,  # 256
+        dropout: float = 0.0,
+    ):
+        '''
+        Description:
+        ------------
+        Count prediction head for the Seq2Seq model.
+        Parameters:
+        -----------
+        loss_mode: `str`
+            Loss mode. Options: ['mse', 'zinb', 'nb']
+        n_genes: `int`
+            number of genes to be predicted.
+        d_model: `int`
+            Token embedding dimension.
+        dropout: `float`
+            Dropout rate for the MLP.
+        Returns:
+        --------
+        count_outputs: `dict`
+            Output dictionary containing the following keys:
+            - 'count_lognorm': Log-normalized count prediction for MSE loss.
+            - 'count_mean': Mean count prediction for ZINB and NB loss.
+            - 'count_dropout': Dropout count prediction for ZINB loss.
+        '''
+        super(CountHead, self).__init__()
+        self.loss_mode = loss_mode
+
+        self.mlp = Mlp(
+            in_features=d_model,
+            hidden_features=d_model,
+            drop=dropout,
+        )
+        if self.loss_mode == 'mse':
+            self.relu_output = nn.Sequential(nn.Linear(d_model, n_genes), nn.ReLU())
+        elif self.loss_mode == 'zinb':
+            self.linear_output = nn.Linear(d_model, n_genes)
+            self.softmax_output = nn.Sequential(
+                nn.Linear(d_model, n_genes), nn.Softmax(dim=-1)
+            )
+        elif self.loss_mode == 'nb':
+            self.softmax_output = nn.Sequential(
+                nn.Linear(d_model, n_genes), nn.Softmax(dim=-1)
+            )
+
+    def forward(self, x):
+        # use cls token for count prediction
+        count_outputs = {}
+        mlp_output = self.mlp(x)
+        mlp_output = nn.functional.normalize(mlp_output, dim=-1, p=2)
+        if self.loss_mode == 'mse':
+            count_outputs['count_lognorm'] = self.relu_output(mlp_output)
+        elif self.loss_mode == 'zinb':
+            count_outputs['count_mean'] = self.softmax_output(mlp_output)
+            count_outputs['count_dropout'] = self.linear_output(mlp_output)
+        elif self.loss_mode == 'nb':
+            count_outputs['count_mean'] = self.softmax_output(mlp_output)
+        return count_outputs
+
+
+class CountDecoder(nn.Module):
+    def __init__(
+        self,
+        pretrained_model: nn.Module = None,
+        loss_mode: str = 'zinb',
+        d_model: int = 128,
+        add_mask_id: bool = True,
+        dropout: float = 0.0,
+        pred_tps: list = [1, 2],
+        n_total_tps: int = 3,
+        n_genes: int = 25426,
+        context_tps: list[int] | None = None,
+    ):
+        '''
+        Description:
+        ------------
+        Loads complete Seq2Seq model with count prediction head.
+        Weights from pretrained seq2seq model are loaded into the model.
+        Use CLS or mean embeddings for count prediction.
+        Parameters:
+        -----------
+        pretrained_model: `nn.Module`
+            Pretrained Seq2Seq model.
+        loss_mode: `str`
+            Loss mode. Options: ['mse', 'zinb', 'nb']
+        d_model: `int`
+            Token embedding dimension.
+        add_mask_id: `bool`
+            Whether to add mask token.
+        dropout: `float`
+            Dropout rate for the MLP.
+        pred_tps: `list`
+            List of time steps for training and testing.
+        context_tps: `list`
+            List of context time steps.
+        n_total_tps: `int`
+            Total number of target time steps.
+        n_genes: `int`
+            Number of genes which counts should be regressed.
+        Returns:
+        --------
+        count_outputs: `dict`
+            Output dictionary containing the following keys:
+            - 'count_output_t{t}': Count prediction for time step t.
+            - 'count_log_norm': Log-normalized count prediction for MSE loss.
+            - 'count_mean': Mean count prediction for ZINB and NB loss.
+            - 'count_dropout': Dropout count prediction for ZINB loss.
+        '''
+        super(CountDecoder, self).__init__()
+        self.pretrained_model = pretrained_model
+        self.embed_dim = d_model
+
+        self.loss_mode = loss_mode
+        self.count_decoder = CountHead(loss_mode, n_genes, d_model, dropout)
+        if add_mask_id:
+            self.mask_token = 1
+
+        self.pred_tps = pred_tps
+        self.context_tps = context_tps
+        self.total_tps = list(range(1, n_total_tps + 1))
+        self.cls_embedding = None
+
+    def forward(
+        self,
+        src_input_id: torch.Tensor,
+        tgt_input_id_dict: dict,
+    ):
+        outputs = self.pretrained_model(
+            src_input_id=src_input_id,
+            tgt_input_id_dict=tgt_input_id_dict,
+            not_masked=True,
+        )
+        count_outputs = {}
+        for _, t in enumerate(self.pred_tps):
+            cls_embedding = outputs[t]['mean_embedding']
+            count_outputs_tmp = self.count_decoder.forward(cls_embedding)
+            count_outputs[f'count_output_t{t}'] = count_outputs_tmp
+
+        return count_outputs
+
+    def generate_counts(
+        self,
+        src_input_id: torch.Tensor,
+        tgt_input_id_dict: dict,
+        can_remask_prev_masked: bool = False,
+        topk_filter_thres: float = 0.9,
+        temperature: float = 2.0,  # keep in range 2.0-3.0
+        # self_cond_prob=0.9,
+        iterations: int = 18,  # optimal of iterations in MaskGIT
+        mask_scheduler: str = 'cosine',
+        sequence_length: int = 2048,
+    ):
+        outputs, generate_id_dict = self.pretrained_model.generate(
+            src_input_id=src_input_id,
+            tgt_input_id_dict=tgt_input_id_dict,
+            can_remask_prev_masked=can_remask_prev_masked,
+            topk_filter_thres=topk_filter_thres,
+            temperature=temperature,
+            iterations=iterations,
+            mask_scheduler=mask_scheduler,
+            sequence_length=sequence_length,
+        )
+
+        count_outputs = {}
+        for t, output in outputs.items():
+            # cls_embedding = outputs['dec_embedding'][:, 0, :]
+            count_outputs[f'count_output_t{t}'] = self.count_decoder.forward(
+                output[t]['mean_embedding']
+            )
+            count_outputs[f'cls_embedding_t{t}'] = output[t]['dec_embedding'][:, 0, :]
+        return count_outputs, generate_id_dict

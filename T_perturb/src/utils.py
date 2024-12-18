@@ -1100,7 +1100,7 @@ def mean_nonpadding_embs(embs, pad, dim=1):
     return mean_embs
 
 
-def generate_pad(tgt):
+def generate_pad(input_ids):
     '''
     Description:
     ------------
@@ -1110,8 +1110,8 @@ def generate_pad(tgt):
     where pad token is True and non-pad token is False.
     Can also be applied to generate source padding mask.
     '''
-    tgt_pad = tgt == 0
-    return tgt_pad
+    pad = input_ids == 0
+    return pad
 
 
 def pairing_src_to_tgt_cells(
