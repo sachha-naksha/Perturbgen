@@ -71,8 +71,8 @@ class PerturberMasking(CellGen):
             - 'count_output_t{t}': Count prediction for time step t.
             - 'cls_embedding_t{t}': CLS token embeddings for time step t.
         '''
-        generate_id_dict: Dict[str, torch.Tensor] = {}
-        # all_outputs: Dict[str, torch.Tensor] = {}
+        generate_id_dict: Dict[int, torch.Tensor] = {}
+        all_outputs: Dict[int, torch.Tensor] = {}
         if self.context_tps is not None:
             all_modelling_tps = self.pred_tps + self.context_tps
             all_modelling_tps = sorted(list(set(all_modelling_tps)))
@@ -86,6 +86,7 @@ class PerturberMasking(CellGen):
             if int(k.split('_t')[-1]) in all_modelling_tps
         }
         for time_step in self.pred_tps:
+            print('pred_tps', self.pred_tps)
             tgt_input_id_dict_ = {k: v.clone() for k, v in tgt_input_id_dict.items()}
             tgt_pad_dict_ = {k: v.clone() for k, v in tgt_pad_dict.items()}
             pad_tensor = torch.ones_like(tgt_pad_dict_[f'tgt_pad_t{time_step}'])
@@ -119,9 +120,9 @@ class PerturberMasking(CellGen):
                 prompt_length=prompt_length,
                 genes_to_perturb=genes_to_perturb,
             )
-            generate_id_dict[tgt_input_id_key] = generated_ids
-
-        return outputs, generate_id_dict
+            generate_id_dict[time_step] = generated_ids
+            all_outputs[time_step] = outputs
+        return all_outputs, generate_id_dict
 
     def generate_sequence(
         self,
@@ -236,8 +237,6 @@ class PerturberMasking(CellGen):
                 # exclude genes_to_perturb from the option to be selected
                 logits[:, :, genes_to_perturb] = max_neg_value
                 # print the shape and then check genes_to_perturb
-                print(logits.shape)
-                print('genes_to_perturb', logits[0, 0, genes_to_perturb])
             # exclude cls token
             tmp_ids_ = tmp_ids[:, prompt_length:].clone()
             scores_ = scores[:, prompt_length:].clone()
@@ -264,4 +263,4 @@ class PerturberMasking(CellGen):
             # add cls token to the ids and update scores and ids
             scores[:, prompt_length:] = scores_
             tmp_ids[:, prompt_length:] = tmp_ids_
-        return outputs, tmp_ids
+        return outputs[tgt_time_step], tmp_ids

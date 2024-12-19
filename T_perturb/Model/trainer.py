@@ -36,6 +36,7 @@ from T_perturb.src.metric import (
 from T_perturb.src.utils import (  # WarmupScheduler,;
     aggregate_attn_weights,
     compute_cos_similarity,
+    compute_rouge_score,
     modify_ckpt_state_dict,
     pearson,
     return_attn_weights,
@@ -803,67 +804,6 @@ class CountDecoderTrainer(LightningModule):
             val, val
         )  # Return mapped value, or original if not in dict
 
-    def compute_rouge_score(
-        self,
-        pred_ids: np.ndarray,
-        tgt_ids: np.ndarray,
-        rouge_len_list: list[int],
-        max_seq_length: int,
-        test_dict: dict[str, list],
-    ) -> dict[str, list[Any]]:
-        # Convert predictions and targets to object type for string replacement
-        pred_ids = pred_ids.astype(object)
-        tgt_ids = tgt_ids.astype(object)
-
-        # Exclude task token (assumed to be the first token)
-        pred_ids = pred_ids[:, 1:]
-
-        # Define special tokens to remove (e.g., 0, 1, 2, 3)
-        special_tokens = np.array([0, 1, 2, 3])
-        pred_ids[np.isin(pred_ids, special_tokens)] = ''
-        tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
-
-        # Convert all integers to strings
-        pred_ids_ = pred_ids.astype(str)
-        tgt_ids_ = tgt_ids.astype(str)
-
-        for seq_len in rouge_len_list:
-            # Truncate sequences based on seq_len
-            if max_seq_length > seq_len:
-                pred_genes_short = pred_ids_[:, :seq_len]
-                true_genes_short = tgt_ids_[:, :seq_len]
-            else:
-                pred_genes_short = pred_ids_
-                true_genes_short = tgt_ids_
-
-            # Convert each row of token IDs to a string
-            pred_ids_str = np.apply_along_axis(
-                lambda row: ' '.join(row), axis=1, arr=pred_genes_short
-            )
-            tgt_ids_str = np.apply_along_axis(
-                lambda row: ' '.join(row), axis=1, arr=true_genes_short
-            )
-
-            # Remove extra spaces
-            pred_ids_str = np.array([' '.join(s.split()) for s in pred_ids_str])
-            tgt_ids_str = np.array([' '.join(s.split()) for s in tgt_ids_str])
-            print('pred_ids', pred_ids_str.tolist())
-            print('tgt_ids', tgt_ids_str.tolist())
-            # Compute ROUGE score for the entire batch at once
-            rouge_result = self.rouge.compute(
-                predictions=pred_ids_str.tolist(),
-                references=tgt_ids_str.tolist(),
-                rouge_types=['rouge1'],
-                use_aggregator=False,
-            )
-            print(rouge_result)
-            # Extract the per-sample ROUGE scores
-            per_sample_scores = rouge_result['rouge1']
-            # Store the results in the test_dict
-            test_dict[f'rouge1_{seq_len}'].extend(per_sample_scores)
-
-        return test_dict
-
     # def compute_rouge_score(
     #     self,
     #     pred_ids: np.ndarray,
@@ -1038,11 +978,12 @@ class CountDecoderTrainer(LightningModule):
             )
             # print(pred_ids_dict)
 
-            for time_step in pred_ids_dict.keys():
+            for t in self.pred_tps:
                 if self.return_rouge_score:
-                    pred_ids = pred_ids_dict[time_step].detach().cpu().numpy()
-                    tgt_ids = batch[time_step].detach().cpu().numpy()
-                    test_dict = self.compute_rouge_score(
+                    pred_ids = pred_ids_dict[t].detach().cpu().numpy()
+                    tgt_ids = batch[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
+                    test_dict = compute_rouge_score(
+                        rouge=self.rouge,
                         pred_ids=pred_ids,
                         tgt_ids=tgt_ids,
                         rouge_len_list=self.rouge_seq_len_list,
@@ -1167,9 +1108,10 @@ class CountDecoderTrainer(LightningModule):
             if self.return_rouge_score:
                 if self.test_dict[f'rouge1_{self.rouge_seq_len_list[0]}']:
                     for seq_len in self.rouge_seq_len_list:
-                        metric_mean[f'rouge1_{seq_len}'] = np.mean(
+                        rouge_score = np.concatenate(
                             self.test_dict[f'rouge1_{seq_len}']
                         )
+                        metric_mean[f'rouge1_{seq_len}'] = np.mean(rouge_score, axis=0)
 
             metrics = pd.DataFrame(metric_mean, index=[0])
             # add metrics on the gene space

@@ -1083,8 +1083,8 @@ class CellGen(nn.Module):
                 - 'cls_embedding_t{t}': CLS token embeddings for time step t.
             - 'generate_id_dict': Dictionary of generated token ids.
         '''
-        generate_id_dict: Dict[str, torch.Tensor] = {}
-        # all_outputs: Dict[str, torch.Tensor] = {}
+        generate_id_dict: Dict[int, torch.Tensor] = {}
+        all_outputs: Dict[int, torch.Tensor] = {}
         if self.context_tps is not None:
             all_modelling_tps = self.pred_tps + self.context_tps
             all_modelling_tps = sorted(list(set(all_modelling_tps)))
@@ -1135,8 +1135,9 @@ class CellGen(nn.Module):
                 scores=scores,
                 tgt_time_step=time_step,
             )
-            generate_id_dict[tgt_input_id_key] = generated_ids
-        return outputs, generate_id_dict
+            generate_id_dict[time_step] = generated_ids
+            all_outputs[time_step] = outputs
+        return all_outputs, generate_id_dict
 
     def generate_sequence(
         self,
@@ -1271,7 +1272,7 @@ class CellGen(nn.Module):
             # add cls token to the ids and update scores and ids
             scores[:, 1:] = scores_
             tmp_ids[:, 1:] = tmp_ids_
-        return outputs, tmp_ids
+        return outputs[tgt_time_step], tmp_ids
 
 
 class CountHead(nn.Module):
@@ -1412,7 +1413,7 @@ class CountDecoder(nn.Module):
             not_masked=True,
         )
         count_outputs = {}
-        for _, t in enumerate(self.pred_tps):
+        for t in self.pred_tps:
             cls_embedding = outputs[t]['mean_embedding']
             count_outputs_tmp = self.count_decoder.forward(cls_embedding)
             count_outputs[f'count_output_t{t}'] = count_outputs_tmp
@@ -1443,10 +1444,11 @@ class CountDecoder(nn.Module):
         )
 
         count_outputs = {}
-        for t, output in outputs.items():
+        for t in self.pred_tps:
+            print(t)
             # cls_embedding = outputs['dec_embedding'][:, 0, :]
             count_outputs[f'count_output_t{t}'] = self.count_decoder.forward(
-                output[t]['mean_embedding']
+                outputs[t]['mean_embedding']
             )
-            count_outputs[f'cls_embedding_t{t}'] = output[t]['dec_embedding'][:, 0, :]
+            count_outputs[f'cls_embedding_t{t}'] = outputs[t]['dec_embedding'][:, 0, :]
         return count_outputs, generate_id_dict

@@ -199,6 +199,65 @@ def condition_for_count_loss(
     )
 
 
+def compute_rouge_score(
+    rouge,
+    pred_ids: np.ndarray,
+    tgt_ids: np.ndarray,
+    rouge_len_list: list[int],
+    max_seq_length: int,
+    test_dict: dict[str, list],
+) -> dict[str, list[float]]:
+    # Convert predictions and targets to object type for string replacement
+    pred_ids = pred_ids.astype(object)
+    tgt_ids = tgt_ids.astype(object)
+
+    # Exclude task token (assumed to be the first token)
+    pred_ids = pred_ids[:, 1:]
+
+    # Define special tokens to remove (e.g., 0, 1, 2, 3)
+    special_tokens = np.array([0, 1, 2, 3])
+    pred_ids[np.isin(pred_ids, special_tokens)] = ''
+    tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
+
+    # Convert all integers to strings
+    pred_ids_ = pred_ids.astype(str)
+    tgt_ids_ = tgt_ids.astype(str)
+
+    for seq_len in rouge_len_list:
+        # Truncate sequences based on seq_len
+        if max_seq_length > seq_len:
+            pred_genes_short = pred_ids_[:, :seq_len]
+            true_genes_short = tgt_ids_[:, :seq_len]
+        else:
+            pred_genes_short = pred_ids_
+            true_genes_short = tgt_ids_
+
+        # Convert each row of token IDs to a string
+        pred_ids_str = np.apply_along_axis(
+            lambda row: ' '.join(row), axis=1, arr=pred_genes_short
+        )
+        tgt_ids_str = np.apply_along_axis(
+            lambda row: ' '.join(row), axis=1, arr=true_genes_short
+        )
+
+        # Remove extra spaces
+        pred_ids_str = np.array([' '.join(s.split()) for s in pred_ids_str])
+        tgt_ids_str = np.array([' '.join(s.split()) for s in tgt_ids_str])
+        # Compute ROUGE score for the entire batch at once
+        rouge_result = rouge.compute(
+            predictions=pred_ids_str.tolist(),
+            references=tgt_ids_str.tolist(),
+            rouge_types=['rouge1'],
+            use_aggregator=False,
+        )
+        # Extract the per-sample ROUGE scores
+        per_sample_scores = rouge_result['rouge1']
+        # Store the results in the test_dict
+        test_dict[f'rouge1_{seq_len}'].append(per_sample_scores)
+
+    return test_dict
+
+
 def compute_cos_similarity(
     outputs: dict,
     time_step: int,
@@ -714,7 +773,7 @@ def return_perturbation_adata(
     obs_key: list,
     output_dir: str,
     file_name: str,
-    mode: Literal['inference', 'generation'],
+    mode: Literal['inference', 'generate'],
 ) -> ad.AnnData:
     """
     Description:
@@ -755,29 +814,23 @@ def return_perturbation_adata(
     cls_embeddings = torch.cat(test_dict['cls_embeddings']).numpy()
     cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
+    delta_probs = torch.cat(test_dict['delta_probs']).numpy()
     print('cosine_similarity', mean_cos_similarity.shape)
     # create dataframe to store perturbation results
     obsm_dict = {
         'cls_embeddings': cls_embeddings,
         'cls_cos_similarity': cls_cos_similarity,
         'mean_cos_similarity': mean_cos_similarity,
+        'delta_probs': delta_probs,
     }
-    if mode == 'generation':
+    if mode == 'generate':
+        print(test_dict['rouge1_25'])
         rouge_dict = {
             key: np.concatenate(test_dict[key])
             for key in test_dict.keys()
             if key.startswith('rouge')
         }
         obsm_dict.update(rouge_dict)
-    elif mode == 'inference':
-        print(test_dict['delta_probs'])
-        delta_probs = torch.cat(test_dict['delta_probs']).numpy()
-        print('delta', delta_probs.shape)
-        obsm_dict['delta_probs'] = delta_probs
-    else:
-        raise ValueError(
-            f'Invalid mode: {mode}.' 'Must be either generation or inference.'
-        )
 
     # adata.obs
     obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
@@ -787,7 +840,7 @@ def return_perturbation_adata(
         obs=test_obs,
         obsm=obsm_dict,
     )
-    # adata.write_h5ad(os.path.join(output_dir, file_name))
+    adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata
 

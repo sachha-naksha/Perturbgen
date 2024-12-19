@@ -149,7 +149,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
     def test_transformer_forward(self):
         # Test forward pass
         batch = next(iter(self.data_module.train_dataloader()))
-        output = self.transformer(batch)
+        output, _ = self.transformer(batch)
         print('batch completed')
         t = list(output.keys())[0]
         self.assertEqual(
