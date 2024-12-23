@@ -61,8 +61,6 @@ class CellGenDataset(Dataset):
         if src_len != tgt_len:
             warn('src and tgt dataset have different length')
         self.dataset_length = min(src_len, tgt_len)
-        print('src_len', src_len)
-        print('tgt_len', tgt_len)
 
     def __getitem__(self, ind):
         out = {
@@ -152,11 +150,6 @@ class CellGenDataModule(LightningDataModule):
         # form of dictionary with key: value pairs based on condition_keys
 
     def setup(self, stage=None):
-        if self.context_tps is not None:
-            all_modelling_tps = self.pred_tps + self.context_tps
-            self.all_modelling_tps = list(set(all_modelling_tps))
-        else:
-            self.all_modelling_tps = self.pred_tps
         dataset_args = {
             'src_dataset': self.src_dataset,
             'tgt_datasets': self.tgt_datasets,
@@ -167,6 +160,8 @@ class CellGenDataModule(LightningDataModule):
         # Assign train/val datasets for use in dataloaders
         # Assign train/val datasets for use in dataloaders
         if stage == 'fit' or stage is None:
+            self.all_modelling_tps = self.pred_tps
+            dataset_args['time_steps'] = self.pred_tps
             if self.condition_encodings is not None:
                 dataset_args['split_indices'] = self.train_indices
                 dataset_args['conditions'] = (
@@ -192,8 +187,14 @@ class CellGenDataModule(LightningDataModule):
                 else:
                     self.val_dataset = None
         if stage == 'test' or stage is None:
-            # use all time steps to provide as context
-            self.all_modelling_tps = self.total_tps
+            if self.context_tps is not None:
+                # use only defined time steps for modelling to avoid data leakage
+                self.all_modelling_tps = self.pred_tps + self.context_tps
+            else:
+                raise ValueError(
+                    'Context_tps must be defined for test stage.'
+                    'It should be the same time steps as used for training.'
+                )
             dataset_args['time_steps'] = self.all_modelling_tps
             dataset_args['split_indices'] = self.test_indices
             if self.condition_encodings is not None:

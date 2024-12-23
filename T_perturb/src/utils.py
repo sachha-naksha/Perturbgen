@@ -44,7 +44,6 @@ class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
 
     def get_lr(self):
         current_step = self.last_epoch + 1
-        print('current step', current_step)
         if current_step < self.warmup_steps:
             # Linear warmup phase: increase from initial_lr to end_lr
             warmup_lr = [
@@ -815,7 +814,6 @@ def return_perturbation_adata(
     cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
     delta_probs = torch.cat(test_dict['delta_probs']).numpy()
-    print('cosine_similarity', mean_cos_similarity.shape)
     # create dataframe to store perturbation results
     obsm_dict = {
         'cls_embeddings': cls_embeddings,
@@ -824,7 +822,6 @@ def return_perturbation_adata(
         'delta_probs': delta_probs,
     }
     if mode == 'generate':
-        print(test_dict['rouge1_25'])
         rouge_dict = {
             key: np.concatenate(test_dict[key])
             for key in test_dict.keys()
@@ -1211,7 +1208,6 @@ def pairing_src_to_tgt_cells(
         if len(adata_dict[category]) > max_rows:
             max_rows = len(adata_dict[category])
             max_reference_time = category
-    print('max ref:', max_reference_time)
     if pairing_mode == 'stratified':
         # drop Donor if they do not have Cell_type, Donor in all the Time_points
         adata_grouped = adata_subset_.obs[
@@ -1255,7 +1251,6 @@ def pairing_src_to_tgt_cells(
                     ].index
                     # only sample with replacement if needed
                     if n_cells_to_pair > cell_to_pair.shape[0]:
-                        print(mapping_df_[stage])
                         sample_with_replacement = True
                     else:
                         sample_with_replacement = False

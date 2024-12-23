@@ -7,7 +7,6 @@ from tqdm import tqdm
 
 from T_perturb.Modules.T_model import CellGen
 from T_perturb.src.utils import (
-    generate_pad,
     gumbel_sample,
     noise_schedule,
     top_k,
@@ -16,7 +15,8 @@ from T_perturb.src.utils import (
 
 class PerturberMasking(CellGen):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super(CellGen).__init__(*args, **kwargs)
+        self.mask_scheduler = kwargs['mask_scheduler']
 
     def generate(
         self,
@@ -29,9 +29,10 @@ class PerturberMasking(CellGen):
         # self_cond_prob=0.9,
         iterations: int = 18,  # optimal of iterations in MaskGIT
         mask_scheduler: str = 'cosine',
-        sequence_length: int = 2048,
+        sequence_length: int | None = None,
         genes_to_perturb: List | None = None,
         prompt_length: int = 1,
+        **kwargs,
     ):
         '''
         Description:
@@ -57,8 +58,6 @@ class PerturberMasking(CellGen):
         mask_scheduler: `str`
             Mask scheduler function.
             Options: ['uniform', 'pow', 'cosine', 'log', 'exp']
-        sequence_length: `int`
-            Maximum length of the generated sequence.
         genes_to_perturb: `List`
             List of genes to perturb.
         prompt_length: `int`
@@ -86,28 +85,21 @@ class PerturberMasking(CellGen):
             if int(k.split('_t')[-1]) in all_modelling_tps
         }
         for time_step in self.pred_tps:
-            print('pred_tps', self.pred_tps)
             tgt_input_id_dict_ = {k: v.clone() for k, v in tgt_input_id_dict.items()}
-            tgt_pad_dict_ = {k: v.clone() for k, v in tgt_pad_dict.items()}
-            pad_tensor = torch.ones_like(tgt_pad_dict_[f'tgt_pad_t{time_step}'])
-            # predict the first n genes in first iteration
-            pad_tensor[:, sequence_length:] = 0
-            tgt_pad = generate_pad(pad_tensor)
-            tgt_pad_dict_[f'tgt_pad_t{time_step}'] = tgt_pad
             tgt_input_id_key = f'tgt_input_ids_t{time_step}'
             tgt_input_id = tgt_input_id_dict[tgt_input_id_key]
             # create ids and scores matrix for each batch
             ids = torch.full_like(tgt_input_id, self.mask_token, dtype=torch.long)
             # add cls token to the ids
             ids[:, :prompt_length] = tgt_input_id[:, :prompt_length]
-            # pad ids
-            ids[:, sequence_length:] = 0
+            # pad ids based on tgt_pad_dict
+            ids[tgt_pad_dict[f'tgt_pad_t{time_step}']] = self.pad_token
             tgt_input_id_dict_[tgt_input_id_key] = ids
             scores = torch.zeros_like(tgt_input_id, dtype=torch.float)
             # use a two-step process to decode the genes
             outputs, generated_ids = self.generate_sequence(
                 generate_id_dict=tgt_input_id_dict_,
-                generate_pad_dict=tgt_pad_dict_,
+                generate_pad_dict=tgt_pad_dict,
                 src_input_id=src_input_id,
                 demask_fn=self,
                 mask_scheduler=mask_scheduler,
@@ -245,6 +237,7 @@ class PerturberMasking(CellGen):
             for sample in range(logits.shape[0]):
                 unique_ids = torch.unique(ids_to_keep_[sample])
                 logits[sample, :, unique_ids] = max_neg_value
+
             filtered_logits = top_k(logits.clone(), topk_filter_thres)
             temperature = starting_temperature * (
                 steps_until_x0 / iteration

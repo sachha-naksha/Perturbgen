@@ -717,8 +717,8 @@ class CellGen(nn.Module):
         )
         self.decoder_fc = nn.Linear(d_model, tgt_vocab_size)
         self.dropout = nn.Dropout(dropout)
-        self.mask_scheduler = mask_scheduler
 
+        self.pad_token = pad_token
         self.context_mode = context_mode
 
     def generate_mask(
@@ -1043,7 +1043,8 @@ class CellGen(nn.Module):
         # self_cond_prob=0.9,
         iterations: int = 18,  # optimal of iterations in MaskGIT
         mask_scheduler: str = 'cosine',
-        sequence_length: int = 2048,
+        sequence_length: int | None = None,
+        **kwargs,
     ):
         '''
         Description:
@@ -1445,7 +1446,6 @@ class CountDecoder(nn.Module):
 
         count_outputs = {}
         for t in self.pred_tps:
-            print(t)
             # cls_embedding = outputs['dec_embedding'][:, 0, :]
             count_outputs[f'count_output_t{t}'] = self.count_decoder.forward(
                 outputs[t]['mean_embedding']

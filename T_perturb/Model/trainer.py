@@ -50,7 +50,7 @@ from T_perturb.src.utils import (  # WarmupScheduler,;
 # from deepspeed.ops.adam import FusedAdam
 
 
-def set_matmul_precision_for_device(precision: Literal['high', 'medium'] = 'high'):
+def set_matmul_precision_for_device(precision: Literal['high', 'medium'] = 'medium'):
     if torch.cuda.is_available():
         cuda_device_name = torch.cuda.get_device_name()
         # If the device is an A100, set the precision for matrix multiplication

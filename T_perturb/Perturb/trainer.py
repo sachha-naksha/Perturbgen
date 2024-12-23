@@ -1,3 +1,4 @@
+import pickle
 from typing import (
     Any,
     List,
@@ -6,6 +7,7 @@ from typing import (
 
 import evaluate
 import torch
+import torch.ao.quantization
 
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
 from torch.nn.functional import cosine_similarity
@@ -26,11 +28,11 @@ class PerturberTrainer(CellGenTrainer):
         sequence_length: int = 2048,
         temperature: float = 2.0,
         iterations: int = 18,
+        mapping_dict_path: str | None = None,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-
         self.transformer = PerturberMasking(
             tgt_vocab_size=kwargs['tgt_vocab_size'],
             d_model=kwargs['d_model'],
@@ -40,19 +42,33 @@ class PerturberTrainer(CellGenTrainer):
             max_seq_length=kwargs['max_seq_length'],
             dropout=kwargs['dropout'],
             pred_tps=kwargs['pred_tps'],
-            context_tps=kwargs['context_tps'],
             n_total_tps=kwargs['n_total_tps'],
             encoder=kwargs['encoder'],
             mask_scheduler=kwargs['mask_scheduler'],
             pos_encoding_mode=kwargs['pos_encoding_mode'],
             return_attn=kwargs['return_attn'],
         )
-
+        if mapping_dict_path is not None:
+            with open(
+                mapping_dict_path,
+                'rb',
+            ) as f:
+                tokenid_to_gene = pickle.load(f)
+        gene_to_token_id = {v: k for k, v in tokenid_to_gene.items()}
         self.perturbation_mode = perturbation_mode
         self.perturbation_sequence = perturbation_sequence
-        self.genes_to_perturb = torch.tensor(genes_to_perturb, dtype=torch.long)
+        self.genes_to_perturb = genes_to_perturb
+        tokens_to_perturb = [gene_to_token_id[gene] for gene in self.genes_to_perturb]
+        self.tokens_to_perturb = torch.tensor(tokens_to_perturb, dtype=torch.long)
         self.perturbation_token = torch.tensor(
             perturbation_token, dtype=torch.long, device=self.device
+        )
+        print(
+            f'Start perturbation ...\n'
+            f'- Perturbation mode: {self.perturbation_mode}\n'
+            f'- Perturbation sequence: {self.perturbation_sequence}\n'
+            f'- Perturbing genes: {genes_to_perturb}\n'
+            f'- Replace with token: {perturbation_token}\n'
         )
 
         self.generate = generate
@@ -73,13 +89,20 @@ class PerturberTrainer(CellGenTrainer):
         self.pos_encoding_mode = kwargs['pos_encoding_mode']
         self.mask_scheduler = kwargs['mask_scheduler']
 
+    # def quantize_model(self, model):
+    #     return torch.ao.quantization.quantize_dynamic(
+    #         model,
+    #         {torch.nn.Linear},
+    #         dtype=torch.qint8,
+    #     )
+
     def forward(
         self,
         batch: Any,
         perturbation: bool = False,
     ):
         if perturbation:
-            self.genes_to_perturb = self.genes_to_perturb.to(self.device)
+            self.tokens_to_perturb = self.tokens_to_perturb.to(self.device)
             self.perturbation_token = self.perturbation_token.to(self.device)
         tgt_input_id_dict = {}
         for i in self.pred_tps:
@@ -95,7 +118,7 @@ class PerturberTrainer(CellGenTrainer):
             if perturbation:
                 if 'tgt' in self.perturbation_sequence:
                     perturbed_tgt = tgt_input_id_.clone()
-                    mask = torch.isin(tgt_input_id_, self.genes_to_perturb)
+                    mask = torch.isin(tgt_input_id_, self.tokens_to_perturb)
 
                     perturbed_tgt[mask] = self.perturbation_token
                     tgt_input_id_dict[f'tgt_input_ids_t{i}'] = perturbed_tgt
@@ -106,7 +129,7 @@ class PerturberTrainer(CellGenTrainer):
         if perturbation:
             if 'src' in self.perturbation_sequence:
                 perturbed_src = batch['src_input_ids'].clone()
-                mask = torch.isin(batch['src_input_ids'], self.genes_to_perturb)
+                mask = torch.isin(batch['src_input_ids'], self.tokens_to_perturb)
                 perturbed_src[mask] = self.perturbation_token
 
             else:
@@ -114,6 +137,7 @@ class PerturberTrainer(CellGenTrainer):
         else:
             perturbed_src = batch['src_input_ids']
         if self.perturbation_mode == 'inference':
+            # self.transformer = self.quantize_model(self.transformer)
             outputs = self.transformer(
                 src_input_id=perturbed_src,
                 tgt_input_id_dict=tgt_input_id_dict,
@@ -130,6 +154,8 @@ class PerturberTrainer(CellGenTrainer):
             perturbed_outputs, _, _ = self.forward(batch, perturbation=True)
 
         elif self.perturbation_mode == 'generate':
+            print(self.transformer)
+            self.transformer = self.quantize_model(self.transformer)
             (
                 _,
                 pert_src_input_ids,
@@ -142,12 +168,11 @@ class PerturberTrainer(CellGenTrainer):
                 'topk_filter_thres': 0.9,
                 'temperature': self.temperature,
                 'iterations': self.iterations,
-                'sequence_length': self.sequence_length,
             }
 
             true_outputs, true_ids_dict = self.transformer.generate(
                 src_input_id=batch['src_input_ids'],
-                genes_to_perturb=self.genes_to_perturb,
+                genes_to_perturb=self.tokens_to_perturb,
                 **decoder_kwargs,
             )
             perturbed_outputs, perturbed_ids_dict = self.transformer.generate(
@@ -209,7 +234,6 @@ class PerturberTrainer(CellGenTrainer):
             if len(self.var_list) > 0:
                 for var in self.var_list:
                     self.test_dict[var].append(batch[f'{var}_t{t}'])
-            print('test_dict', self.test_dict)
 
     def on_test_epoch_end(self):
         obs_key = self.var_list if len(self.var_list) > 0 else []
@@ -219,10 +243,10 @@ class PerturberTrainer(CellGenTrainer):
             obs_key=obs_key,
             output_dir=self.output_dir,
             file_name=(
-                f'{self.date}_{self.perturbation_mode}_adata_'
-                f't{self.pred_tps}_{self.encoder}'
-                f'_p{self.pos_encoding_mode}_'
-                f'm{self.mask_scheduler}_s{self.sequence_length}'
+                f'{self.date}_m{self.perturbation_mode}_adata'
+                f'_g{self.genes_to_perturb}'
+                f'_s{self.perturbation_sequence}'
+                f'_t{self.perturbation_token}.h5ad'
             ),
             mode=self.perturbation_mode,
         )
