@@ -155,7 +155,6 @@ class CellGenDataModule(LightningDataModule):
             'tgt_datasets': self.tgt_datasets,
             'src_counts': self.src_counts,
             'tgt_counts_dict': self.tgt_counts_dict,
-            'time_steps': self.all_modelling_tps,
         }
         # Assign train/val datasets for use in dataloaders
         # Assign train/val datasets for use in dataloaders
@@ -191,10 +190,9 @@ class CellGenDataModule(LightningDataModule):
                 # use only defined time steps for modelling to avoid data leakage
                 self.all_modelling_tps = self.pred_tps + self.context_tps
             else:
-                raise ValueError(
-                    'Context_tps must be defined for test stage.'
-                    'It should be the same time steps as used for training.'
-                )
+                print('Define context_tps for testing')
+                self.all_modelling_tps = self.total_tps
+
             dataset_args['time_steps'] = self.all_modelling_tps
             dataset_args['split_indices'] = self.test_indices
             if self.condition_encodings is not None:

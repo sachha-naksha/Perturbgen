@@ -17,7 +17,6 @@ from torch import einsum, nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.nn.functional import scaled_dot_product_attention
-from tqdm import tqdm
 from transformers import BertForMaskedLM
 
 from T_perturb.src.utils import (
@@ -720,14 +719,13 @@ class CellGen(nn.Module):
 
         self.pad_token = pad_token
         self.context_mode = context_mode
+        self.mask_scheduler = mask_scheduler
 
     def generate_mask(
         self,
         tgt_input_id,
         tgt_pad,
-        mlm_probability=0.15,
         mask_mode='MASKGIT',
-        mask_scheduler='cosine',
     ):
         '''
         Description:
@@ -759,7 +757,7 @@ class CellGen(nn.Module):
         '''
         device = tgt_input_id.device
         labels = tgt_input_id.clone()
-        if mask_mode == 'BERT':
+        if (mask_mode == 'BERT') and (self.mlm_probability is not None):
             # Masked language modeling for the target tokens.
             # Prepare masked tokens inputs/labels for masked language modeling:
             # 80% MASK, 10% random, 10% original.
@@ -767,7 +765,7 @@ class CellGen(nn.Module):
             # https://github.com/huggingface/transformers/blob/main/src/transformers/data/data_collator.py#L840 # noqa
             # Accessed: 2024-05-12
             probability_matrix = torch.full_like(
-                tgt_pad, mlm_probability, dtype=torch.float
+                tgt_pad, self.mlm_probability, dtype=torch.float
             )
             # Do not mask CLS and PAD tokens
             cls_tgt_pad = tgt_pad.clone()
@@ -800,7 +798,7 @@ class CellGen(nn.Module):
             rand_time = uniform((batch,), device=device)
             rand_mask_probs = noise_schedule(
                 rand_time,
-                method=mask_scheduler,
+                method=self.mask_scheduler,
                 total_tokens=torch.tensor((seq_len - 1), device=device),
             )
             num_token_masked = (
@@ -1010,9 +1008,7 @@ class CellGen(nn.Module):
                 tgt_input_id, labels = self.generate_mask(
                     tgt_input_id,
                     tgt_pad,
-                    self.mlm_probability,
                     mask_mode='MASKGIT',
-                    mask_scheduler=self.mask_scheduler,
                 )
             else:
                 # no true labels for MLM loss
@@ -1204,12 +1200,11 @@ class CellGen(nn.Module):
         # find total_tokens by find the numbers of 1s in the mask
         total_tokens = torch.sum(tmp_ids == 1, dim=1)
         ids_to_keep = torch.zeros_like(tmp_ids, dtype=torch.long)
-        for iteration, steps_until_x0 in tqdm(
-            zip(
-                torch.linspace(0, 1, iterations),
-                reversed(range(iterations)),
-            ),
-            total=iterations,
+        iteration_ratios = torch.linspace(0, 1, iterations)
+        all_steps = reversed(range(iterations))
+        for iteration, steps_until_x0 in zip(
+            iteration_ratios,
+            all_steps,
         ):
             # mask scheduler function, gamma
             rand_mask_prob = noise_schedule(
@@ -1218,7 +1213,7 @@ class CellGen(nn.Module):
                 method=mask_scheduler,
             )
             # set score to -inf for padding tokens
-            scores = scores.masked_fill(
+            scores.masked_fill_(
                 generate_pad_dict[f'tgt_pad_t{tgt_time_step}'], max_neg_value
             )
             unmasked = (scores != max_neg_value).sum(dim=1)
@@ -1230,7 +1225,7 @@ class CellGen(nn.Module):
             # Mask the top `num_tokens_to_mask` positions for each sample
             for i in range(batch_size):
                 mask[i, indices_to_mask[i, : num_tokens_to_mask[i]]] = True
-            tmp_ids = tmp_ids.masked_fill(mask, self.mask_token)
+            tmp_ids.masked_fill_(mask, self.mask_token)
             # keep indices which are not masked except for the CLS token
             ids_to_keep = torch.where(
                 mask,
@@ -1252,9 +1247,8 @@ class CellGen(nn.Module):
             scores_ = scores[:, 1:].clone()
             ids_to_keep_ = ids_to_keep[:, 1:].clone()
             # Create a mask of already predicted tokens
-            for sample in range(logits.shape[0]):
-                unique_ids = torch.unique(ids_to_keep_[sample])
-                logits[sample, :, unique_ids] = max_neg_value
+            indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - 1, -1)
+            logits.scatter_(2, indices, max_neg_value)
             filtered_logits = top_k(logits.clone(), topk_filter_thres)
             temperature = starting_temperature * (
                 steps_until_x0 / iteration
@@ -1269,7 +1263,7 @@ class CellGen(nn.Module):
             scores_ = rearrange(scores_, '... 1 -> ...')
 
             if not can_remask_prev_masked:
-                scores_ = scores_.masked_fill(~is_mask, max_neg_value)
+                scores_.masked_fill_(~is_mask, max_neg_value)
             # add cls token to the ids and update scores and ids
             scores[:, 1:] = scores_
             tmp_ids[:, 1:] = tmp_ids_

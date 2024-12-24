@@ -154,8 +154,8 @@ class PerturberTrainer(CellGenTrainer):
             perturbed_outputs, _, _ = self.forward(batch, perturbation=True)
 
         elif self.perturbation_mode == 'generate':
-            print(self.transformer)
-            self.transformer = self.quantize_model(self.transformer)
+            # print(self.transformer)
+            # self.transformer = self.quantize_model(self.transformer)
             (
                 _,
                 pert_src_input_ids,
@@ -180,13 +180,15 @@ class PerturberTrainer(CellGenTrainer):
                 **decoder_kwargs,
             )
             for t in self.pred_tps:
-                pert_ids = perturbed_ids_dict[t].detach().cpu().numpy()
+                # pert_ids = perturbed_ids_dict[t].detach().cpu().numpy()
                 true_ids = true_ids_dict[t].detach().cpu().numpy()
+                # ground truth
+                input_ids = batch[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
 
                 test_dict = compute_rouge_score(
                     rouge=self.rouge,
-                    pred_ids=pert_ids,
-                    tgt_ids=true_ids,
+                    pred_ids=true_ids,
+                    tgt_ids=input_ids,
                     rouge_len_list=self.rouge_seq_len_list,
                     max_seq_length=self.max_seq_length,
                     test_dict=self.test_dict,

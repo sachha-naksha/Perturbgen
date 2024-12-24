@@ -3,7 +3,6 @@ from typing import Dict, List
 import torch
 from einops import rearrange
 from torch import nn
-from tqdm import tqdm
 
 from T_perturb.Modules.T_model import CellGen
 from T_perturb.src.utils import (
@@ -15,7 +14,7 @@ from T_perturb.src.utils import (
 
 class PerturberMasking(CellGen):
     def __init__(self, *args, **kwargs):
-        super(CellGen).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.mask_scheduler = kwargs['mask_scheduler']
 
     def generate(
@@ -70,6 +69,9 @@ class PerturberMasking(CellGen):
             - 'count_output_t{t}': Count prediction for time step t.
             - 'cls_embedding_t{t}': CLS token embeddings for time step t.
         '''
+        import time
+
+        start = time.time()
         generate_id_dict: Dict[int, torch.Tensor] = {}
         all_outputs: Dict[int, torch.Tensor] = {}
         if self.context_tps is not None:
@@ -114,6 +116,8 @@ class PerturberMasking(CellGen):
             )
             generate_id_dict[time_step] = generated_ids
             all_outputs[time_step] = outputs
+        end = time.time()
+        print(f'Time to load test generation: {end - start}')
         return all_outputs, generate_id_dict
 
     def generate_sequence(
@@ -182,12 +186,11 @@ class PerturberMasking(CellGen):
         # find total_tokens by find the numbers of 1s in the mask
         total_tokens = torch.sum(tmp_ids == 1, dim=1)
         ids_to_keep = torch.zeros_like(tmp_ids, dtype=torch.long)
-        for iteration, steps_until_x0 in tqdm(
-            zip(
-                torch.linspace(0, 1, iterations),
-                reversed(range(iterations)),
-            ),
-            total=iterations,
+        iteration_ratios = torch.linspace(0, 1, iterations)
+        all_steps = reversed(range(iterations))
+        for iteration, steps_until_x0 in zip(
+            iteration_ratios,
+            all_steps,
         ):
             # mask scheduler function, gamma
             rand_mask_prob = noise_schedule(
@@ -196,19 +199,17 @@ class PerturberMasking(CellGen):
                 method=mask_scheduler,
             )
             # set score to -inf for padding tokens
-            scores = scores.masked_fill(
+            scores.masked_fill_(
                 generate_pad_dict[f'tgt_pad_t{tgt_time_step}'], max_neg_value
             )
             unmasked = (scores != max_neg_value).sum(dim=1)
             num_tokens_to_mask = (unmasked.float() * rand_mask_prob).long()
             mask = torch.zeros_like(scores, dtype=torch.bool)
-            indices_to_mask = torch.topk(
-                scores, num_tokens_to_mask.max(), dim=-1
-            ).indices
+            _, indices_to_mask = torch.topk(scores, num_tokens_to_mask.max(), dim=-1)
             # Mask the top `num_tokens_to_mask` positions for each sample
             for i in range(batch_size):
                 mask[i, indices_to_mask[i, : num_tokens_to_mask[i]]] = True
-            tmp_ids = tmp_ids.masked_fill(mask, self.mask_token)
+            tmp_ids.masked_fill_(mask, self.mask_token)
             # keep indices which are not masked except for the CLS token
             ids_to_keep = torch.where(
                 mask,
@@ -234,9 +235,8 @@ class PerturberMasking(CellGen):
             scores_ = scores[:, prompt_length:].clone()
             ids_to_keep_ = ids_to_keep[:, prompt_length:].clone()
             # Create a mask of already predicted tokens
-            for sample in range(logits.shape[0]):
-                unique_ids = torch.unique(ids_to_keep_[sample])
-                logits[sample, :, unique_ids] = max_neg_value
+            indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - prompt_length, -1)
+            logits.scatter_(2, indices, max_neg_value)
 
             filtered_logits = top_k(logits.clone(), topk_filter_thres)
             temperature = starting_temperature * (
@@ -252,7 +252,7 @@ class PerturberMasking(CellGen):
             scores_ = rearrange(scores_, '... 1 -> ...')
 
             if not can_remask_prev_masked:
-                scores_ = scores_.masked_fill(~is_mask, max_neg_value)
+                scores_.masked_fill_(~is_mask, max_neg_value)
             # add cls token to the ids and update scores and ids
             scores[:, prompt_length:] = scores_
             tmp_ids[:, prompt_length:] = tmp_ids_
