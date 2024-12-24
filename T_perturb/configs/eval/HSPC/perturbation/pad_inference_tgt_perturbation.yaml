@@ -3,7 +3,11 @@ data:
   src_dataset_file: "T_perturb/T_perturb/pp/res/hspc/dataset_10000_hvg_src/stem.dataset"
   src_adata_file: "T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_10000_hvg_src/stem.h5ad"
   tgt_adata_folder: "T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_10000_hvg_tgt"
+
 trainer:
+  test_mode: 'masking'
+  return_embed: true
+  generate: false
   tgt_vocab_size: 22044
   d_model: 512
   num_heads: 8
@@ -39,8 +43,8 @@ trainer:
 datamodule:
   batch_size: 64
   num_workers: 8
+  shuffle: true
   context_tps: [2]
-  shuffle: False
   split: False
   max_len: 2200
   var_list:

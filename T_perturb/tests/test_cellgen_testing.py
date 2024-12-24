@@ -201,9 +201,16 @@ class CellGenTestGenerationCase(unittest.TestCase):
     def test_generation(self):
         # Test generation
         # Use the PyTorch Lightning Trainer to test the training loop
+        device_name = torch.cuda.get_device_name(0)
+        precision = (
+            'bf16-true'
+            if device_name.startswith('A100') or device_name.startswith('H100')
+            else '16-true'
+        )
         trainer = pl.Trainer(
             limit_test_batches=1,  # Limit to a single batch for quick testing
             logger=False,
+            precision=precision,
         )
         trainer.test(self.decoder_module, self.data_module)
 
