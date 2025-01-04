@@ -7,7 +7,6 @@ from typing import (
 
 import evaluate
 import torch
-import torch.ao.quantization
 
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
 from torch.nn.functional import cosine_similarity
@@ -190,13 +189,13 @@ class PerturberTrainer(CellGenTrainer):
         else:
             perturbed_src = batch['src_input_ids']
 
-        if self.perturbation_mode is None:
-            outputs = self.transformer(
+        if self.condition:
+            print()
+            outputs = self.transformer.forward_with_cond_scale(
                 src_input_id=batch['src_input_ids'],
                 tgt_input_id_dict=tgt_input_id_dict,
                 not_masked=self.return_embeddings,
                 condition_ids=self.condition_ids,
-                cond_drop_prob=1.0,
             )
         elif self.perturbation_mode == 'inference':
             outputs = self.transformer(
@@ -211,12 +210,15 @@ class PerturberTrainer(CellGenTrainer):
         return outputs, perturbed_src, tgt_input_id_dict
 
     def training_step(self, batch, *args, **kwargs):
+        torch.autograd.set_detect_anomaly(True)
         outputs, _, _ = self.forward(
             batch, perturbation=False, condition=self.condition
         )
         for t in outputs.keys():
             dec_logits = outputs[t]['dec_logits']
+            print(dec_logits.shape)
             labels = outputs[t]['labels']
+            print(labels.shape)
             with torch.no_grad():
                 perp = self.perplexity(dec_logits, labels)
                 self.log(

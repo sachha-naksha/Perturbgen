@@ -29,7 +29,7 @@ def dummy_dataset(
         # Generate unique indices for each sample using NumPy
         input_ids_np = np.array(
             [
-                np.random.choice(np.arange(2, vocab_size + 1), max_len, replace=False)
+                np.random.choice(np.arange(2, vocab_size), max_len, replace=False)
                 for _ in range(num_samples)
             ]
         )
@@ -51,9 +51,7 @@ def dummy_dataset(
         for t in range(total_time_steps):
             input_ids_np = np.array(
                 [
-                    np.random.choice(
-                        np.arange(2, vocab_size + 1), max_len, replace=False
-                    )
+                    np.random.choice(np.arange(2, vocab_size), max_len, replace=False)
                     for _ in range(num_samples)
                 ]
             )

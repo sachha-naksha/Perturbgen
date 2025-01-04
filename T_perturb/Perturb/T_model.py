@@ -2,6 +2,7 @@ from typing import Dict, List
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from einops import rearrange
 from torch import nn
 
@@ -18,11 +19,17 @@ from T_perturb.src.utils import (
 
 class PerturberMasking(CellGen):
     def __init__(
-        self, condition_dict: Dict[str, dict[str, int]] | None = None, *args, **kwargs
+        self,
+        pad_token: int = 0,
+        condition_dict: Dict[str, dict[str, int]] | None = None,
+        *args,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.mask_scheduler = kwargs['mask_scheduler']
-        print('condition_dict', condition_dict)
+        self.token_embedding = nn.Embedding(
+            kwargs['tgt_vocab_size'], kwargs['d_model'], padding_idx=pad_token
+        )
         # add <null> token for uncoditional generation
         if condition_dict is not None:
             condition_dict_ = condition_dict.copy()
@@ -82,23 +89,34 @@ class PerturberMasking(CellGen):
         rand_int[tgt_pad] = 2
         batch_randperm = rand_int.argsort(dim=-1)
         mask = batch_randperm < rearrange(num_token_masked, 'b -> b 1')
+        tgt_input_id = tgt_input_id.clone()
         tgt_input_id[mask] = self.mask_token
         labels[~mask] = -100
         return tgt_input_id, labels
 
-    def forward_with_cond_scale(self, *args, cond_scale=3.0, **kwargs):
-        if cond_scale == 1:
-            return self.forward(*args, cond_drop_prob=0.0, **kwargs)
+    def forward_with_cond_scale(self, cond_scale=3.0, *args, **kwargs):
+        # ---classifier-free guidance---
+        # run two fwd passes with the same time step
+        # one with conditional and one unconditional
+        random_tps = [np.random.choice(self.pred_tps)]
 
-        logits, embed = self.forward(
-            *args, return_embed=True, cond_drop_prob=0.0, **kwargs
+        conditional_out = self.forward(
+            cond_drop_prob=0.0, tgt_time_step=random_tps[0], *args, **kwargs
         )
-
-        null_logits = self.forward(*args, cond_drop_prob=1.0, **kwargs)
-
-        scaled_logits = null_logits + (logits - null_logits) * cond_scale
-
-        return scaled_logits
+        unconditional_out = self.forward(
+            cond_drop_prob=1.0, tgt_time_step=random_tps[0], *args, **kwargs
+        )
+        if cond_scale == 1:
+            return conditional_out
+        elif cond_scale == 0:
+            return unconditional_out
+        else:
+            for t in conditional_out.keys():
+                null_logits = unconditional_out[t]['dec_logits']
+                logits = conditional_out[t]['dec_logits']
+                scaled_logits = null_logits + (logits - null_logits) * cond_scale
+                conditional_out[t]['dec_logits'] = scaled_logits
+            return conditional_out
 
     def forward(
         self,
@@ -108,8 +126,8 @@ class PerturberMasking(CellGen):
         tgt_input_id_dict: dict | None = None,
         generate_id_dict: dict | None = None,
         generate_pad_dict: dict | None = None,
-        condition_ids: torch.tensor | None = None,
-        cond_drop_prob: float = 0.5,
+        condition_ids: torch.Tensor | None = None,
+        cond_drop_prob: float = 0.0,
     ):
         if tgt_input_id_dict:
             tgt_pad_dict = self.call_padding(
@@ -135,6 +153,9 @@ class PerturberMasking(CellGen):
             elif generate_id_dict is not None:
                 # MASKGIT generation
                 tgt_input_id_dict = generate_id_dict
+                sorted_time_steps = [tgt_time_step]
+            else:
+                # cfg
                 sorted_time_steps = [tgt_time_step]
         all_outputs = {}
         for tgt_time_step in sorted_time_steps:
@@ -170,9 +191,13 @@ class PerturberMasking(CellGen):
             # ---classifier-free guidance---
             if condition_ids is not None:
                 cond_token_emb = self.cond_embedding(condition_ids)
+                cond_len = cond_token_emb.shape[1]
                 tgt_embedding = torch.cat([cond_token_emb, tgt_embedding], dim=1)
                 cond_pad = prob_mask_like(condition_ids.shape, cond_drop_prob)
                 tgt_pad = torch.cat([cond_pad, tgt_pad], dim=1)
+                if labels is not None:
+                    # add -100 to ignore condition tokens in CE loss
+                    labels = F.pad(labels, (cond_len, 0), value=-100)
 
             tgt_embedding = self.pos_embedding(tgt_embedding, tgt_time_step)
             # does not include any context
