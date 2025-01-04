@@ -612,52 +612,53 @@ class CellGen(nn.Module):
         '''
         Description:
         ------------
-        Seq2Seq model for cell generation
-        using masked language modeling adopted from MaskGIT.
+            Seq2Seq model for cell generation
+            using masked language modeling adopted from MaskGIT.
+
         Parameters:
         -----------
-        tgt_vocab_size: `int`
-            Target vocabulary size.
-        d_model: `int`
-            Token embedding dimension.
-        num_heads: `int`
-            Number of attention heads.
-        num_layers: `int`
-            Number of attention layers.
-        d_ff: `int`
-            Dimension of the feed forward network.
-        max_seq_length: `int`
-            Maximum sequence length.
-        dropout: `float`
-            Dropout rate.
-        mlm_probability: `float`
-            Fraction of tokens to mask.
-        pre_tps: `list`
-            List of time steps for training and testing.
-            the proportion of tokens to mask.
-        n_total_tps: `int`
-            Total number of target time steps.
-        mask_scheduler: `str`
-            Masking scheduler defining
-        mode: Literal['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
-            Mode of the encoder.
-        pos_encoding_mode:
-            Literal['time_pos_sin', 'comb_sin', 'sin_learnt', 'time_pos_learnt']
-            Positional encoding type.
-        context_mode: `bool`
-            Whether to use context mode, where other time steps are used as context.
-        context_tps: `list`
-            List of context time steps.
+            tgt_vocab_size: `int`
+                Target vocabulary size.
+            d_model: `int`
+                Token embedding dimension.
+            num_heads: `int`
+                Number of attention heads.
+            num_layers: `int`
+                Number of attention layers.
+            d_ff: `int`
+                Dimension of the feed forward network.
+            max_seq_length: `int`
+                Maximum sequence length.
+            dropout: `float`
+                Dropout rate.
+            mlm_probability: `float`
+                Fraction of tokens to mask.
+            pre_tps: `list`
+                List of time steps for training and testing.
+                the proportion of tokens to mask.
+            n_total_tps: `int`
+                Total number of target time steps.
+            mask_scheduler: `str`
+                Masking scheduler defining
+            mode: Literal['GF_frozen', 'GF_fine_tuned', 'Transformer_encoder']
+                Mode of the encoder.
+            pos_encoding_mode:
+                Literal['time_pos_sin', 'comb_sin', 'sin_learnt', 'time_pos_learnt']
+                Positional encoding type.
+            context_mode: `bool`
+                Whether to use context mode, where other time steps are used as context.
+            context_tps: `list`
+                List of context time steps.
 
         Returns:
         --------
-        outputs: `dict`
-            Output dictionary containing the following keys:
-            - 'dec_logits': Decoder logits.
-            - 'labels': True labels for masked tokens.
-            - 'selected_time_step': Selected time step.
-            - 'dec_embedding': Decoder embeddings.
-            - 'mean_embedding': Mean embeddings for non-padding tokens.
+            outputs: `dict`
+                Output dictionary containing the following keys:
+                - 'dec_logits': Decoder logits.
+                - 'labels': True labels for masked tokens.
+                - 'selected_time_step': Selected time step.
+                - 'dec_embedding': Decoder embeddings.
+                - 'mean_embedding': Mean embeddings for non-padding tokens.
         '''
         super(CellGen, self).__init__()
         self.pos_embedding = PositionalEncoding(
@@ -730,30 +731,30 @@ class CellGen(nn.Module):
         '''
         Description:
         ------------
-        Prepare masked tokens for the target input.
+            Prepare masked tokens for the target input.
 
         Parameters:
         -----------
-        tgt_input_id: `torch.Tensor`
-            Target token input.
-        tgt_pad: `torch.Tensor`
-            Target padding mask.
-        mlm_probability: `float`
-            Fraction of tokens to mask.
-        mask_mode: `str`
-            Masking mode: ['BERT', 'MASKGIT']
-            BERT: 80% MASK, 10% random, 10% original.
-            MASKGIT: mask tokens based on the mask scheduler.
-        mask_scheduler: `str`
-            Masking scheduler defining
-            the proportion of tokens to mask for MASKGIT
+            tgt_input_id: `torch.Tensor`
+                Target token input.
+            tgt_pad: `torch.Tensor`
+                Target padding mask.
+            mlm_probability: `float`
+                Fraction of tokens to mask.
+            mask_mode: `str`
+                Masking mode: ['BERT', 'MASKGIT']
+                BERT: 80% MASK, 10% random, 10% original.
+                MASKGIT: mask tokens based on the mask scheduler.
+            mask_scheduler: `str`
+                Masking scheduler defining
+                the proportion of tokens to mask for MASKGIT
 
         Returns:
         --------
-        tgt_input_id: `torch.Tensor`
-            Target token input with masked tokens.
-        labels: `torch.Tensor`
-            True labels for masked tokens. Return -100 for non-masked tokens.
+            tgt_input_id: `torch.Tensor`
+                Target token input with masked tokens.
+            labels: `torch.Tensor`
+                True labels for masked tokens. Return -100 for non-masked tokens.
         '''
         device = tgt_input_id.device
         labels = tgt_input_id.clone()
@@ -841,7 +842,6 @@ class CellGen(nn.Module):
         src_attention_mask,
         dec_embedding,
         tgt_pad,
-        time_random,
         labels=None,
     ):
         self_attn_list = []
@@ -918,7 +918,6 @@ class CellGen(nn.Module):
                         src_attention_mask=context_pad,
                         dec_embedding=dec_embedding,
                         tgt_pad=tgt_pad,
-                        time_random=time_step,
                         labels=None,
                     )
                     context_embs_list.append(dec_outputs['dec_embedding'])
@@ -1023,7 +1022,6 @@ class CellGen(nn.Module):
                 else src_attention_mask,
                 dec_embedding=tgt_embedding,
                 tgt_pad=tgt_pad,
-                time_random=tgt_time_step,
                 labels=labels,
             )
             all_outputs[tgt_time_step] = outputs

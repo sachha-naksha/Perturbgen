@@ -121,6 +121,7 @@ class CellGenTrainer(LightningModule):
             mask_scheduler=mask_scheduler,
             pos_encoding_mode=pos_encoding_mode,
             return_attn=return_attn,
+            context_mode=context_mode,
         )
         self.masking_loss = nn.CrossEntropyLoss()
 

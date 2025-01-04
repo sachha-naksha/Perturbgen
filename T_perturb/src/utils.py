@@ -1062,6 +1062,28 @@ def subset_adata(adata, cell_pairings):
     return adata_subsetted
 
 
+# Code adapte from lucidrains/muse-maskgit-pytorch
+# https://github.com/lucidrains/muse-maskgit-pytorch/blob/main/muse_maskgit_pytorch/muse_maskgit_pytorch.py#L26 # noqa
+
+# classifier free guidance functions
+
+
+def uniform(shape, min=0, max=1, device=None):
+    return torch.zeros(shape, device=device).float().uniform_(min, max)
+
+
+def prob_mask_like(shape, prob, device=None):
+    if prob == 1:
+        return torch.ones(shape, device=device, dtype=torch.bool)
+    elif prob == 0:
+        return torch.zeros(shape, device=device, dtype=torch.bool)
+    else:
+        return uniform(shape, device=device) < prob
+
+
+# generation helper functions
+
+
 def noise_schedule(
     ratio,
     method,
@@ -1088,15 +1110,6 @@ def noise_schedule(
     return mask_ratio
 
 
-def prob_mask_like(shape, prob, device=None):
-    if prob == 1:
-        return torch.ones(shape, device=device, dtype=torch.bool)
-    elif prob == 0:
-        return torch.zeros(shape, device=device, dtype=torch.bool)
-    else:
-        return uniform(shape, device=device) < prob
-
-
 def top_k(logits, thres=0.9):
     k = math.ceil((1 - thres) * logits.shape[-1])
     val, ind = logits.topk(k, dim=-1)
@@ -1117,10 +1130,6 @@ def gumbel_noise(t):
 
 def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim=dim)
-
-
-def uniform(shape, min=0, max=1, device=None):
-    return torch.zeros(shape, device=device).float().uniform_(min, max)
 
 
 def mean_nonpadding_embs(embs, pad, dim=1):

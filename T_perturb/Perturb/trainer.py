@@ -24,6 +24,7 @@ class PerturberTrainer(CellGenTrainer):
         sequence_length: int = 2048,
         temperature: float = 2.0,
         iterations: int = 18,
+        condition: bool = False,
         mapping_dict_path: str | None = None,
         genes_to_perturb: List[int] | None = None,
         perturbation_mode: Literal['inference', 'generate'] | None = None,
@@ -44,11 +45,14 @@ class PerturberTrainer(CellGenTrainer):
             max_seq_length=kwargs['max_seq_length'],
             dropout=kwargs['dropout'],
             pred_tps=kwargs['pred_tps'],
+            context_tps=kwargs['context_tps'],
             n_total_tps=kwargs['n_total_tps'],
             encoder=kwargs['encoder'],
             mask_scheduler=kwargs['mask_scheduler'],
             pos_encoding_mode=kwargs['pos_encoding_mode'],
             return_attn=kwargs['return_attn'],
+            condition_dict=condition_dict,
+            context_mode=kwargs['context_mode'],
         )
         self.perturbation_mode = perturbation_mode
         if perturbation_mode is not None and genes_to_perturb is not None:
@@ -100,14 +104,16 @@ class PerturberTrainer(CellGenTrainer):
         self.pos_encoding_mode = kwargs['pos_encoding_mode']
         self.mask_scheduler = kwargs['mask_scheduler']
 
+        self.condition = condition
         self.condition_dict = condition_dict
-        if self.condition_dict is not None:
+        if self.condition and self.condition_dict is not None:
             self.condition_ids = torch.zeros(
                 batch_size,
                 len(self.condition_dict),
                 dtype=torch.long,
             )
-            print(f'condition_ids: {self.condition_ids.shape}')
+        else:
+            self.condition_ids = None
 
     # def quantize_model(self, model):
     #     return torch.ao.quantization.quantize_dynamic(
@@ -127,41 +133,49 @@ class PerturberTrainer(CellGenTrainer):
             self.perturbation_token = self.perturbation_token.to(self.device)
         tgt_input_id_dict = {}
         for i in self.pred_tps:
-            # create metadata tokens for cfg
             if condition and self.condition_dict is not None:
                 for j, condition in enumerate(self.condition_dict.keys()):
-                    condition_ids = batch[f'{condition}_t{i}']
-                    condition_tokens = [
-                        self.condition_dict[condition][id] for id in condition_ids
-                    ]
+                    if condition == 'timepoint':
+                        time_token = torch.tensor(
+                            self.condition_dict['timepoint'][f't_{i}'], dtype=torch.long
+                        )
+                        self.condition_ids[:, j] = torch.tensor(
+                            time_token, dtype=torch.long
+                        )
+                    else:
+                        condition_ids = batch[f'{condition}_t{i}']
+                        condition_tokens = [
+                            self.condition_dict[condition][id] for id in condition_ids
+                        ]
+                        # j+1 to skip time token
+                        self.condition_ids[:, j] = torch.tensor(
+                            condition_tokens, dtype=torch.long
+                        )
 
-                    self.condition_ids[:, j] = torch.tensor(
-                        condition_tokens, dtype=torch.long
-                    )
-
-            tgt_input_id_ = torch.cat(
-                (
-                    getattr(self, f'cls_token_{str(i)}').expand(
-                        batch[f'tgt_input_ids_t{i}'].shape[0], -1
-                    ),
-                    batch[f'tgt_input_ids_t{i}'],
-                ),
-                dim=1,
-            )
+            tgt_input_id = batch[f'tgt_input_ids_t{i}']
+            # tgt_input_id_ = torch.cat(
+            #     (
+            #         getattr(self, f'cls_token_{str(i)}').expand(
+            #             batch[f'tgt_input_ids_t{i}'].shape[0], -1
+            #         ),
+            #         batch[f'tgt_input_ids_t{i}'],
+            #     ),
+            #     dim=1,
+            # )
             if perturbation:
                 if (
                     self.perturbation_sequence is not None
                     and 'tgt' in self.perturbation_sequence
                 ):
-                    perturbed_tgt = tgt_input_id_.clone()
-                    mask = torch.isin(tgt_input_id_, self.tokens_to_perturb)
+                    perturbed_tgt = tgt_input_id.clone()
+                    mask = torch.isin(tgt_input_id, self.tokens_to_perturb)
 
                     perturbed_tgt[mask] = self.perturbation_token
                     tgt_input_id_dict[f'tgt_input_ids_t{i}'] = perturbed_tgt
                 else:
-                    tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
+                    tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id
             else:
-                tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
+                tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id
         if perturbation:
             if (
                 self.perturbation_sequence is not None
@@ -181,12 +195,15 @@ class PerturberTrainer(CellGenTrainer):
                 src_input_id=batch['src_input_ids'],
                 tgt_input_id_dict=tgt_input_id_dict,
                 not_masked=self.return_embeddings,
+                condition_ids=self.condition_ids,
+                cond_drop_prob=1.0,
             )
         elif self.perturbation_mode == 'inference':
             outputs = self.transformer(
                 src_input_id=perturbed_src,
                 tgt_input_id_dict=tgt_input_id_dict,
                 not_masked=True,
+                condition_ids=self.condition_ids,
             )
         else:
             outputs = None
@@ -194,7 +211,9 @@ class PerturberTrainer(CellGenTrainer):
         return outputs, perturbed_src, tgt_input_id_dict
 
     def training_step(self, batch, *args, **kwargs):
-        outputs, _, _ = self.forward(batch, perturbation=False, condition=True)
+        outputs, _, _ = self.forward(
+            batch, perturbation=False, condition=self.condition
+        )
         for t in outputs.keys():
             dec_logits = outputs[t]['dec_logits']
             labels = outputs[t]['labels']
