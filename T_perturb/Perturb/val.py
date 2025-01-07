@@ -7,7 +7,7 @@ import torch
 import yaml  # type: ignore
 from datasets import load_from_disk
 
-from T_perturb.Perturb.datamodule import PerturberDataModule
+from T_perturb.Dataloaders.datamodule import CellGenDataModule
 from T_perturb.Perturb.trainer import PerturberTrainer
 from T_perturb.src.utils import read_dataset_files
 
@@ -61,7 +61,7 @@ else:
     print('Using 32-bit precision for inference')
 
 decoder_module = PerturberTrainer(n_total_tps=n_total_tps, **config['trainer'])
-data_module = PerturberDataModule(
+data_module = CellGenDataModule(
     n_total_tps=n_total_tps,
     src_dataset=src_dataset,
     tgt_datasets=tgt_datasets,

@@ -1064,23 +1064,11 @@ def subset_adata(adata, cell_pairings):
 # Code adapte from lucidrains/muse-maskgit-pytorch
 # https://github.com/lucidrains/muse-maskgit-pytorch/blob/main/muse_maskgit_pytorch/muse_maskgit_pytorch.py#L26 # noqa
 
-# classifier free guidance functions
+# generation helper functions
 
 
 def uniform(shape, min=0, max=1, device=None):
     return torch.zeros(shape, device=device).float().uniform_(min, max)
-
-
-def prob_mask_like(shape, prob, device=None):
-    if prob == 1:
-        return torch.ones(shape, device=device, dtype=torch.bool)
-    elif prob == 0:
-        return torch.zeros(shape, device=device, dtype=torch.bool)
-    else:
-        return uniform(shape, device=device) < prob
-
-
-# generation helper functions
 
 
 def noise_schedule(

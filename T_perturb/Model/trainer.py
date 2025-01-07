@@ -6,7 +6,6 @@ from typing import (
     Dict,
     List,
     Literal,
-    Optional,
 )
 
 import anndata as ad
@@ -92,10 +91,10 @@ class CellGenTrainer(LightningModule):
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
         precision: Literal['high', 'medium'] = 'medium',
-        var_list: Optional[List[str]] = None,
-        gene_names: Optional[List[str]] = None,
-        mapping_dict_path: Optional[str] = None,
-        context_tps: Optional[List[int]] = None,
+        var_list: List[str] | None = None,
+        gene_names: List[str] | None = None,
+        mapping_dict_path: str | None = None,
+        context_tps: List[int] | None = None,
         # *args,
         # **kwargs,
     ) -> None:
