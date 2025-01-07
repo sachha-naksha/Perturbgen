@@ -68,6 +68,7 @@ data_module = PerturberDataModule(
     **config['datamodule'],
 )
 data_module.setup()
+test_loader = data_module.test_dataloader()
 
 accelerator = 'gpu' if torch.cuda.is_available() else 'cpu'
 trainer = pl.Trainer(

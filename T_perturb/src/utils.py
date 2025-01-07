@@ -660,8 +660,7 @@ def return_prediction_adata(
     """
     print('---Start saving embeddings')
     # adata.X
-    if len(test_dict['true_counts']) > 1:
-        true_counts = torch.cat(test_dict['true_counts'], dim=0).numpy()
+    true_counts = torch.cat(test_dict['true_counts'], dim=0).numpy()
     # adata.obsm
     cls_embeddings = torch.cat(test_dict['cls_embeddings'], dim=0).numpy()
     # adata.obs
@@ -681,7 +680,7 @@ def return_prediction_adata(
     del gene_embeddings_dict
 
     adata = ad.AnnData(
-        X=true_counts if len(test_dict['true_counts']) > 1 else None,
+        X=true_counts,
         obs=test_obs,
         var=test_var if gene_names is not None else None,
         obsm={
@@ -1146,17 +1145,17 @@ def mean_nonpadding_embs(embs, pad, dim=1):
     pad_mask = ~pad_mask
     # create a tensor of original lengths
     original_lens = pad_mask.sum(dim=1)
-    original_lens = original_lens.to(embs.dtype)
 
     # create CLS token mask
     if embs.dim() == 3:
         # fill the masked positions in embs with zeros
         masked_embs = embs.masked_fill(~pad_mask.unsqueeze(2), 0.0)
         # compute the mean across the non-padding dimensions
-        mean_embs = masked_embs.sum(dim) / original_lens.view(-1, 1)
+        mean_embs = masked_embs.sum(dim) / original_lens.view(-1, 1).float()
+
     elif embs.dim() == 2:
         masked_embs = embs.masked_fill(~pad_mask, 0.0)
-        mean_embs = masked_embs.sum(dim) / original_lens
+        mean_embs = masked_embs.sum(dim) / original_lens.float()
     return mean_embs
 
 

@@ -96,10 +96,10 @@ class CellGenTrainer(LightningModule):
         gene_names: Optional[List[str]] = None,
         mapping_dict_path: Optional[str] = None,
         context_tps: Optional[List[int]] = None,
-        *args,
-        **kwargs,
+        # *args,
+        # **kwargs,
     ) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.save_hyperparameters()
         set_matmul_precision_for_device(precision)
         if context_tps is None:
@@ -410,16 +410,11 @@ class CellGenTrainer(LightningModule):
                 cos_similarity = cos_similarity.to(torch.float16)
                 gene_embeddings = gene_embeddings.detach().cpu()
                 gene_embeddings = gene_embeddings.to(torch.float16)
-                # check if counts is in batch
-                if f'tgt_counts_t{t}' in batch.keys():
-                    true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
-                    self.test_dict['true_counts'].append(true_counts)
-                cls_embeddings = (
-                    outputs[t]['mean_embedding'].detach().cpu().to(torch.float16)
-                )
+                true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
+                cls_embeddings = outputs[t]['mean_embedding'].detach().cpu()
                 # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
-
+                self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
                 self.test_dict[f'gene_embeddings_t{t}'].append(gene_embeddings)
                 self.test_dict['cosine_similarities'].append(cos_similarity)
@@ -982,6 +977,7 @@ class CountDecoderTrainer(LightningModule):
             outputs, pred_ids_dict = self.decoder.generate_counts(
                 **decoder_kwargs,
             )
+            # print(pred_ids_dict)
 
             for t in self.pred_tps:
                 if self.return_rouge_score:

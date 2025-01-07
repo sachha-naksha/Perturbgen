@@ -190,7 +190,7 @@ class CellGenDataModule(LightningDataModule):
                 self.all_modelling_tps = self.pred_tps + self.context_tps
             else:
                 print('Define context_tps for testing')
-                self.all_modelling_tps = self.pred_tps
+                self.all_modelling_tps = self.total_tps
 
             dataset_args['time_steps'] = self.all_modelling_tps
             dataset_args['split_indices'] = self.test_indices
