@@ -233,6 +233,7 @@ def get_args():
             'GF_fine_tuned',
             'GF_frozen',
             'Transformer_encoder',
+            'scmaskgit',
         ],
         help='mode of encoder',
     )
@@ -312,7 +313,6 @@ def main() -> None:
             f'Number of samples in val set: {len(val_indices)}\n'
             f'Number of samples in test set: {len(test_indices)}'
         )
-        raise
     else:
         # return all the indices
         train_indices = list(range(len(src_dataset)))
@@ -363,7 +363,7 @@ def main() -> None:
     # ----------------------------------------------------------------------------------
     trainer_kwargs = {
         'tgt_vocab_size': args.tgt_vocab_size,
-        'd_model': 512,
+        'd_model': 768,
         'num_heads': 8,
         'num_layers': args.num_layers,
         'd_ff': args.d_ff,
@@ -522,14 +522,14 @@ def main() -> None:
     #     # offload_parameters=True,
     # )
 
-    # if torch.cuda.is_available():
-    #     cuda_device_name = torch.cuda.get_device_name()
-    # if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
-    #     print(f'Using {cuda_device_name} for training')
-    #     precision = 'bf16-mixed'
-    # else:
-    #     precision = '16-mixed'
-    # After each epoch, convert DeepSpeed checkpoint to FP32 and save
+    if torch.cuda.is_available():
+        cuda_device_name = torch.cuda.get_device_name()
+    if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
+        print(f'Using {cuda_device_name} for training')
+        precision = 'bf16-mixed'
+    else:
+        precision = '16-mixed'
+    # # After each epoch, convert DeepSpeed checkpoint to FP32 and save
     # class DeepSpeedCheckpointConverter(Callback):
     #     def __init__(self, checkpoint_path, filename, save_interval=5):
     #         super().__init__()
@@ -585,7 +585,7 @@ def main() -> None:
         ],
         max_epochs=args.epochs,
         accelerator=accelerator,
-        # precision=16,
+        precision=precision,
         devices=-1 if torch.cuda.is_available() else 0,
         strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
     )

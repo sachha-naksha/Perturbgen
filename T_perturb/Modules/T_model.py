@@ -13,6 +13,7 @@ from typing import (
 import numpy as np
 import torch
 from einops import rearrange, repeat
+from scmaskgit.Modules.T_model import scmoscf
 from torch import einsum, nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -106,6 +107,8 @@ class PositionalEncoding(nn.Module):
         if self.encoder == 'Transformer_encoder':
             # add one time step to included src time step
             n_time_steps = n_time_steps + 1
+        elif self.encoder == 'scmaskgit':
+            n_time_steps = n_time_steps + 2
 
         if self.mode == 'time_pos_sin':
             self.register_buffer(
@@ -154,9 +157,11 @@ class PositionalEncoding(nn.Module):
         if self.encoder in ['GF_frozen', 'GF_fine_tuned']:
             tgt_time_step_ = tgt_time_step - 1
         elif self.encoder == 'Transformer_encoder':
-            # start from 0 to include src time step
+            # adjust for src embedding starting at 0
             tgt_time_step_ = tgt_time_step
-
+        elif self.encoder == 'scmaskgit':
+            # adjust for src embedding starting at 0
+            tgt_time_step_ = tgt_time_step + 1
         if self.mode == 'time_pos_sin':
             time_pe = self.time_pe[:, tgt_time_step_]
             time_pe = time_pe.unsqueeze(0).expand(x.size(0), x.size(1), -1)
@@ -478,6 +483,55 @@ class Geneformerwrapper(nn.Module):
         return embs
 
 
+class scmaskgitwrapper(nn.Module):
+    def __init__(
+        self,
+        # model_path='/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output1/checkpoints/20250107_1024_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=08.ckpt',
+        model_path=(
+            '/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/'
+            'output2/checkpoints/20250110_2325_cellgen_train_masking_lr_5e'
+            '-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=01.ckpt'
+        ),
+    ):
+        '''
+        Description:
+        ------------
+        Wrapper for scMaskGit model.
+
+        Parameters:
+        -----------
+        model_path: `str`
+            Path to the scMaskGit model.
+
+        '''
+        super(scmaskgitwrapper, self).__init__()
+
+        self.model = scmoscf(
+            tgt_vocab_size=26717,
+            d_model=768,
+            num_heads=8,
+            num_layers=6,
+            d_ff=96,
+            max_seq_length=4096,
+            dropout=0.03,
+        )
+        pretrained_dict = torch.load(model_path, map_location='cpu', weights_only=True)[
+            'state_dict'
+        ]
+        corrected_dict = {
+            k.replace('transformer.', ''): v for k, v in pretrained_dict.items()
+        }
+        self.model.load_state_dict(corrected_dict)
+        for param in self.model.parameters():
+            param.requires_grad = False
+        self.model.eval()
+
+    def forward(self, src_input_id):
+        with torch.no_grad():
+            outputs = self.model.forward(src_input_id=src_input_id)
+        return outputs['dec_embedding']
+
+
 class Encoder(nn.Module):
     '''
     Description:
@@ -608,6 +662,11 @@ class CellGen(nn.Module):
         pad_token: int = 0,
         context_mode: bool = True,
         context_tps: List[int] | None = None,
+        model_path=(
+            '/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output2/'
+            'checkpoints/20250110_2325_cellgen_train_masking_lr_5e-05_wd_1e-06_batch'
+            '_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt'
+        ),
     ):
         '''
         Description:
@@ -661,6 +720,7 @@ class CellGen(nn.Module):
             - 'mean_embedding': Mean embeddings for non-padding tokens.
         '''
         super(CellGen, self).__init__()
+
         self.pos_embedding = PositionalEncoding(
             d_model=d_model,
             length=max_seq_length,
@@ -689,6 +749,9 @@ class CellGen(nn.Module):
         )
         if encoder in ['GF_frozen', 'GF_fine_tuned']:
             self.encoder_layers = Geneformerwrapper(mode=encoder)
+        elif encoder == 'scmaskgit':
+            print('-- Initializing scmaskgit model')
+            self.encoder_layers = scmaskgitwrapper(model_path)
         elif encoder == 'Transformer_encoder':
             self.encoder_layers = Encoder(
                 total_vocab_size=tgt_vocab_size,
@@ -830,10 +893,14 @@ class CellGen(nn.Module):
         return tgt_pad_dict
 
     def call_encoder(self, src_input_id, src_attention_mask):
+        encoder_params = {'src_input_id': src_input_id}
         if self.encoder in ['GF_frozen', 'GF_fine_tuned']:
             # BERT mask: 1 for tokens to keep, 0 for tokens to mask. Thus, negate mask.
             src_attention_mask = ~src_attention_mask.clone().int()
-        enc_output = self.encoder_layers(src_input_id, src_attention_mask)
+        if self.encoder != 'scmaskgit':
+            # scmaskgit model creates its own attention mask
+            encoder_params['src_attention_mask'] = src_attention_mask
+        enc_output = self.encoder_layers(**encoder_params)
         return enc_output
 
     def call_decoder(

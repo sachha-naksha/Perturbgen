@@ -1,6 +1,6 @@
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=2:block=yes' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
+#BSUB -gpu 'mode=exclusive_process:num=4:block=yes' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
 #BSUB -n 16 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
@@ -38,17 +38,17 @@ mkdir -p $RES_DIR/$RES_NAME
 # python3 $cwd/train.py \
 python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/train.py \
 --train_mode masking \
---split True \
+--split False \
 --splitting_mode stratified \
 --split_obs celltype_v2 \
 --output_dir $RES_DIR/$RES_NAME/res \
---src_dataset "./T_perturb/T_perturb/pp/res/hspc/dataset_10000_hvg_src/stem.dataset" \
---tgt_dataset_folder "./T_perturb/T_perturb/pp/res/hspc/dataset_10000_hvg_tgt" \
---src_adata "./T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_10000_hvg_src/stem.h5ad" \
---tgt_adata_folder "./T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_10000_hvg_tgt" \
---mapping_dict_path  "./T_perturb/T_perturb/pp/res/hspc/token_id_to_genename_10000_hvg.pkl" \
+--src_dataset "T_perturb/T_perturb/pp/res/hspc/dataset_all_src/stem.dataset" \
+--tgt_dataset_folder "T_perturb/T_perturb/pp/res/hspc/dataset_all_tgt" \
+--src_adata "T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_all_src/stem.h5ad" \
+--tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_all_tgt" \
+--mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc/token_id_to_genename_10000_all.pkl" \
 --batch_size 64 \
---max_len 2200 \
+--max_len 4096 \
 --epochs 10 \
 --tgt_vocab_size 22044 \
 --cellgen_lr 0.00001 \
@@ -59,7 +59,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --num_layers 6 \
 --pred_tps 1 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
---encoder GF_frozen \
+--encoder scmaskgit \
 --context_mode True \
 --mask_scheduler 'cosine' \
 --pos_encoding_mode 'time_pos_learnt'

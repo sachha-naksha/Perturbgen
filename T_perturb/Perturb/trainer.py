@@ -247,9 +247,35 @@ class PerturberTrainer(CellGenTrainer):
                 and 'src' in self.perturbation_sequence
             ):
                 perturbed_src = batch['src_input_ids'].clone()
-                mask = torch.isin(batch['src_input_ids'], self.tokens_to_perturb)
-                perturbed_src[mask] = self.perturbation_token
+                if self.perturbation_mode == 'delete':
+                    # Create a mask for elements not equal to the target token
+                    mask = perturbed_src != self.tokens_to_perturb
+                    # add padding mask
+                    pad_mask = perturbed_src != self.pad_token_id
+                    mask_ = mask & pad_mask
+                    # Count the number of valid tokens in each sequence
+                    valid_counts = mask_.sum(dim=1)
+                    # Get indices for valid tokens
+                    valid_tokens = perturbed_src[mask_]
 
+                    # Initialize the result tensor filled with pad_token_id
+                    perturbed_src = torch.full_like(perturbed_src, self.pad_token_id)
+
+                    # Use advanced indexing to fill the valid tokens
+                    # into the perturbed_src tensor
+                    batch_indices = torch.arange(
+                        perturbed_src.size(0), device=perturbed_src.device
+                    ).repeat_interleave(valid_counts)
+                    position_indices = torch.cat(
+                        [
+                            torch.arange(c, device=perturbed_src.device)
+                            for c in valid_counts
+                        ]
+                    )
+                    perturbed_src[batch_indices, position_indices] = valid_tokens
+                else:
+                    mask = torch.isin(perturbed_src, self.tokens_to_perturb)
+                    perturbed_src[mask] = self.perturbation_token
             else:
                 perturbed_src = batch['src_input_ids']
         else:
@@ -289,7 +315,10 @@ class PerturberTrainer(CellGenTrainer):
         special_token_names = ['<cls>', '<mask>', '<pad>', '<eos>']
         special_tokens = [mapping_dict[token] for token in special_token_names]
         tokens_to_exclude = torch.cat(
-            (torch.tensor(special_tokens), perturbation_tokens)
+            (
+                torch.tensor(special_tokens, device=perturbation_tokens.device),
+                perturbation_tokens,
+            )
         )
         pad_mask = torch.isin(input_ids, tokens_to_exclude)
         # create a tensor of original lengths

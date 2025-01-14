@@ -858,7 +858,6 @@ def return_perturbation_adata(
     )
     adata.var_names = adata.var['gene_name']
     adata.X = cos_similarity_df
-    raise
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata

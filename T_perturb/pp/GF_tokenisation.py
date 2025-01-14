@@ -145,6 +145,33 @@ def get_args():
         default=10000,
         help='Number of highly variable genes to keep',
     )
+    parser.add_argument(
+        '--gene_median_path',
+        type=str,
+        # default='/lustre/scratch126/cellgen/team361/am74/'
+        # 'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
+        # 'Dictionaries/trace_median.pkl',
+        default='T_perturb/Geneformer/geneformer/gene_median_dictionary_gc95M.pkl',
+        help='Path to gene median file',
+    )
+    parser.add_argument(
+        '--token_dict_path',
+        type=str,
+        # default='/lustre/scratch126/cellgen/team361/am74/'
+        # 'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
+        # 'Dictionaries/trace_token.pkl',
+        default='T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
+        help='Path to token dictionary file',
+    )
+    parser.add_argument(
+        '--gene_mapping_path',
+        type=str,
+        # default='/lustre/scratch126/cellgen/team361/am74/'
+        # 'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
+        # 'Dictionaries/trace_gene_mapping.pkl',
+        default='T_perturb/Geneformer/geneformer/gene_name_id_dict_gc95M.pkl',
+        help='Path to gene mapping file',
+    )
     args = parser.parse_args()
     return args
 
@@ -155,7 +182,13 @@ def get_args():
 args = get_args()
 print('Start preprocessing adata...')
 adata = sc.read_h5ad(args.h5ad_path)
-# remove all duplicate genes
+
+gene_filter_mode_suffix = (
+    f'{args.gene_filtering_mode}'
+    if args.gene_filtering_mode == 'all'
+    else f'{args.n_hvg}_{args.gene_filtering_mode}'
+)
+
 if args.dataset == 'cytoimmgen':
     adata = map_ensembl_to_genename(
         adata,
@@ -196,9 +229,9 @@ else:
     raise ValueError('Invalid gene filtering mode')
 
 # create gene mapping file
-with open('./T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl', 'rb') as f:
+with open(args.token_dict_path, 'rb') as f:
     token_dict = pickle.load(f)
-with open('./T_perturb/Geneformer/geneformer/gene_name_id_dict_gc95M.pkl', 'rb') as f:
+with open(args.gene_mapping_path, 'rb') as f:
     genename_dict = pickle.load(f)
 
 
@@ -213,7 +246,8 @@ token_to_genename = {
 }
 # save token_dict
 with open(
-    f'./T_perturb/T_perturb/pp/res/{args.dataset}/' f'token_id_to_genename_all.pkl',
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
+    f'token_id_to_genename_{gene_filter_mode_suffix}.pkl',
     'wb',
 ) as file:
     pickle.dump(token_to_genename, file)
@@ -235,9 +269,9 @@ with open(
 # make new directory to store h5ad files
 paired_h5ad_dir = (
     f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-    f'/h5ad_pairing_{args.n_hvg}_'
-    f'{args.gene_filtering_mode}'
+    f'/h5ad_pairing_{gene_filter_mode_suffix}'
 )
+
 if not os.path.exists(paired_h5ad_dir):
     os.makedirs(paired_h5ad_dir)
 # add unique index to adata obs for cell pairing
@@ -252,23 +286,8 @@ if not (issparse(adata.X)):
 # adata.obs = adata.obs[args.var_list]
 adata.var = adata.var[['gene_name', 'ensembl_id']]
 adata.obs['n_counts'] = adata.X.sum(axis=1)
-
-# with open(
-#     './T_perturb/Geneformer/geneformer/ensembl_mapping_dict_gc95M.pkl', 'rb'
-# ) as f:
-#     gene_mapping_dict = pickle.load(f)
-# gene_ids_collapsed = [
-#     gene_mapping_dict.get(gene_id.upper()) for gene_id in adata.var.ensembl_id
-# ]
-# gene_ids_collapsed_in_dict = [
-#     gene for gene in gene_ids_collapsed if gene in token_dict.keys()
-# ]
-# adata_duplicated = adata.copy()
-# adata_duplicated.var['ensembl_id_collapsed'] = gene_ids_collapsed
-# adata_duplicated.var_names = gene_ids_collapsed
-# adata = adata[:, ~adata_duplicated.var.index.isna()]
-if args.exclude_non_GF_genes is False:
-    adata.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
+# save adata
+adata.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
 
 # # load adata
 # adata = sc.read_h5ad(
@@ -283,23 +302,20 @@ else:
     (adata_subset, token_id_to_row_id_dict, row_id_to_gene_name) = tokenid_mapping(
         adata,
         # './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
-        '/lustre/scratch126/cellgen//team361/am74/Adib/TRACE/Loom_cohort/'
-        'tdigest/2nd_run/Dictionaries/trace_token.pkl',
+        args.token_dict_path,
         exclude_non_GF_genes=True,
     )
     # save row id to gene name mapping
     with open(
         f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-        f'/token_id_to_genename_{args.n_hvg}_'
-        f'{args.gene_filtering_mode}.pkl',
+        f'/token_id_to_genename_{gene_filter_mode_suffix}.pkl',
         'wb',
     ) as file:
         pickle.dump(row_id_to_gene_name, file)
     # save token id to row id mapping
     with open(
         f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
-        f'tokenid_to_rowid_{args.n_hvg}_'
-        f'{args.gene_filtering_mode}.pkl',
+        f'tokenid_to_rowid_{gene_filter_mode_suffix}.pkl',
         'wb',
     ) as file:
         pickle.dump(token_id_to_row_id_dict, file)
@@ -307,11 +323,8 @@ else:
         adata_subset.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
 print('Finished preprocessing adata.')
 print('Start tokenisation of adata...')
-input_dir = paired_h5ad_dir
-
 output_dir = (
-    f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-    f'/dataset_{args.n_hvg}_{args.gene_filtering_mode}'
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}/' f'dataset_{gene_filter_mode_suffix}'
 )
 var_to_keep: Dict[str, str] = {v: v for v in args.var_list}.copy()
 # add cell_pairing_index to var_to_keep
@@ -323,25 +336,14 @@ tk = TranscriptomeTokenizer(
     model_input_size=4096,
     collapse_gene_ids=True,
     special_token=True,
-    gene_median_file=(
-        '/lustre/scratch126/cellgen/team361/am74/'
-        'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
-        'Dictionaries/trace_median.pkl'
-    ),
-    token_dictionary_file=(
-        '/lustre/scratch126/cellgen/team361/am74/'
-        'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
-        'Dictionaries/trace_token.pkl'
-    ),
-    gene_mapping_file=(
-        '/lustre/scratch126/cellgen/team361/am74/'
-        'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
-        'Dictionaries/trace_gene_mapping.pkl'
-    ),
+    # gene_median_file=args.gene_median_path,
+    # token_dictionary_file=args.token_dict_path,
+    # gene_mapping_file=args.gene_mapping_path,
 )
 # time it
 # Proceed with your main logic
 file_name = args.dataset
+
 tk.tokenize_data(
     data_directory=paired_h5ad_dir,
     output_directory=output_dir,
@@ -368,8 +370,7 @@ cell_pairings = pairing_src_to_tgt_cells(
 )
 
 paired_dataset_dir = (
-    f'./T_perturb/T_perturb/res/{args.dataset}/'
-    f'dataset_{args.n_hvg}_{args.gene_filtering_mode}'
+    f'./T_perturb/T_perturb/res/{args.dataset}/' f'dataset_{gene_filter_mode_suffix}'
 )
 # token_id_to_row_id_dict = pickle.load(
 #     open(
@@ -378,12 +379,15 @@ paired_dataset_dir = (
 #         'rb',
 #     )
 # )
-dataset_mapped = dataset.map(
-    lambda example: map_input_ids_to_row_id(
-        example, token_id_to_row_id_dict, ignore_tokens=[2]
-    ),
-    num_proc=4,
-)
+if args.gene_filtering_mode == 'all':
+    dataset_mapped = dataset
+else:
+    dataset_mapped = dataset.map(
+        lambda example: map_input_ids_to_row_id(
+            example, token_id_to_row_id_dict, ignore_tokens=[2]
+        ),
+        num_proc=4,
+    )
 n_tgt_iter = 1  # for enumerating the timepoints
 for time_point in tqdm.tqdm(args.time_point_order):
     # subset adata by cell pairings

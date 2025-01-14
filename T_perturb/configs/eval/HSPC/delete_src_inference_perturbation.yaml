@@ -15,16 +15,15 @@ trainer:
   output_dir: 'T_perturb/T_perturb/plt/res/hspc/embeddings/res'
   mapping_dict_path: 'T_perturb/T_perturb/pp/res/hspc/token_id_to_genename_10000_hvg.pkl'
   encoder: 'GF_frozen'
-  context_mode: true
+  context_mode: false
   temperature: 1.5
   iterations: 19
   pos_encoding_mode: 'time_pos_learnt'
   return_attn: false
+  perturbation_mode: 'delete'
   genes_to_perturb:
-    - 'CD79A'
-    - 'CD79B'
-  perturbation_token: 0
-  perturbation_mode: 'inference'
+    - 'SPINK2'
+  validation_mode: 'inference'
   perturbation_sequence:
     - 'src'
   var_list:
@@ -52,4 +51,5 @@ datamodule:
   pred_tps:
     - 1
 model:
+  precision: 16
   ckpt_masking_path: "T_perturb/T_perturb/plt/res/hspc/embeddings/res/checkpoints/20241114_1146_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt"

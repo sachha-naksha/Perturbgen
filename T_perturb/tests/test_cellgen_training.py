@@ -78,7 +78,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
         self.max_seq_length = 50
         self.tgt_vocab_size = 101  # +1 for padding token
         self.batch_size = 4
-        self.d_model = 12
+        self.d_model = 768
 
     def setUp(self):
         # Reproducibility
@@ -102,7 +102,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
             pred_tps=self.pred_tps,
             n_total_tps=self.n_total_tps,
             pos_encoding_mode='time_pos_sin',
-            encoder='Transformer_encoder',
+            encoder='scmaskgit',
             mapping_dict_path=(
                 './T_perturb/T_perturb/pp/res/'
                 'cytoimmgen/token_id_to_genename_hvg.pkl'

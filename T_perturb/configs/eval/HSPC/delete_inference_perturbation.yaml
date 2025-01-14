@@ -20,12 +20,13 @@ trainer:
   iterations: 19
   pos_encoding_mode: 'time_pos_learnt'
   return_attn: false
-  perturbation_mode: 'mask'
+  perturbation_mode: 'delete'
   genes_to_perturb:
-    - 'SPINK2'
+    - 'CD79A'
   validation_mode: 'inference'
   perturbation_sequence:
     - 'src'
+    - 'tgt'
   var_list:
     - 'sex'
     - 'phase'
