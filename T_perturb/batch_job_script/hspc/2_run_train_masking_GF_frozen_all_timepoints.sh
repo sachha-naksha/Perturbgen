@@ -25,7 +25,7 @@ echo "--- Start computing model"
 
 # # # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/plt/res"
-RES_NAME="hspc/embeddings"
+RES_NAME="hspc/hspc_pbmc_median"
 # if directory does not exist, create it with the name $RES_NAME
 mkdir -p $RES_DIR/$RES_NAME
 # # Get the current timestamp
@@ -41,16 +41,16 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --split False \
 --splitting_mode stratified \
 --split_obs celltype_v2 \
---output_dir $RES_DIR/$RES_NAME/res \
---src_dataset "./T_perturb/T_perturb/pp/res/hspc/dataset_10000_hvg_src/stem.dataset" \
---tgt_dataset_folder "./T_perturb/T_perturb/pp/res/hspc/dataset_10000_hvg_tgt" \
---src_adata "./T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_10000_hvg_src/stem.h5ad" \
---tgt_adata_folder "./T_perturb/T_perturb/pp/res/hspc/h5ad_pairing_10000_hvg_tgt" \
---mapping_dict_path  "./T_perturb/T_perturb/pp/res/hspc/token_id_to_genename_10000_hvg.pkl" \
+--output_dir $RES_DIR/$RES_NAME/ \
+--src_dataset "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_src/stem.dataset" \
+--tgt_dataset_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt" \
+--src_adata "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_src/stem.h5ad" \
+--tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_tgt" \
+--mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc_pbmc_median/token_id_to_genename_10000_hvg.pkl" \
 --batch_size 64 \
 --max_len 2200 \
 --epochs 10 \
---tgt_vocab_size 22044 \
+--tgt_vocab_size 20046 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
 --mlm_prob 0.15 \
@@ -59,11 +59,12 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --num_layers 6 \
 --pred_tps 1 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
---encoder GF_frozen \
+--encoder scmaskgit \
+--encoder_path "/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt" \
 --context_mode True \
 --mask_scheduler 'cosine' \
 --pos_encoding_mode 'time_pos_sin' \
---d_model 512
+--d_model 768
 echo "--- Finished computing model"
 
 # 2k hvgs

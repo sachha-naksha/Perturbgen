@@ -6,8 +6,8 @@
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/GF_tokenisation_hspc_%J.out # output file
 #BSUB -e logs/GF_tokenisation_hspc_%J.err # error file
-#BSUB -M 50000  # RAM memory part 2. Default: 100MB
-#BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
+#BSUB -M 30000  # RAM memory part 2. Default: 100MB
+#BSUB -R 'select[mem>30000] rusage[mem=30000]' # RAM memory part 1. Default: 100MB
 #BSUB -J GF_tokenisation_hspc # job name
 
 # activate python environment
@@ -19,7 +19,7 @@ echo "--- Start tokenisation"
 python3 $cwd/pp/GF_tokenisation.py \
 --h5ad_path './data/20241026_HSPC/cd34.h5ad' \
 --dataset hspc_pbmc_median \
---gene_filtering_mode all \
+--gene_filtering_mode hvg \
 --var_list assignment_id sex tissue phase\
  celltype_v2 donor_tissue diff_state dataset\
  cell_pairing_index \
@@ -34,3 +34,8 @@ python3 $cwd/pp/GF_tokenisation.py \
 --gene_mapping_path '/lustre/scratch126/cellgen/team361/am74/Adib/TRACE/Loom_cohort/tdigest/2nd_run/Dictionaries/filtered_trace_geneid.pkl'
 
 echo "--- Finished tokenisation"
+
+# hspc_GF_26k_median
+# --gene_median_path '/lustre/scratch126/cellgen/team361/am74/Adib/TRACE/Loom_cohort/tdigest/2nd_run/Dictionaries/trace_median.pkl' \
+# --token_dict_path '/lustre/scratch126/cellgen/team361/am74/Adib/TRACE/Loom_cohort/tdigest/2nd_run/Dictionaries/trace_token.pkl' \
+# --gene_mapping_path '/lustre/scratch126/cellgen/team361/am74/Adib/TRACE/Loom_cohort/tdigest/2nd_run/Dictionaries/trace_gene_mapping.pkl'

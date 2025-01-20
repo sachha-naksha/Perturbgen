@@ -19,7 +19,7 @@ source /lustre/scratch126/cellgen/team361/kl11/t_generative/.cellgen_4096/bin/ac
 
 # results directory
 RES_DIR="/lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/plt/res"
-RES_NAME="eb/extrapolation/"
+RES_NAME="eb/pbmc_median"
 
 # # if directory does not exist, create it with the name $RES_NAME
 # mkdir -p $RES_DIR/$RES_NAME
@@ -40,16 +40,16 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --split False \
 --splitting_mode random \
 --output_dir $RES_DIR/$RES_NAME/res \
---ckpt_masking_path 'T_perturb/T_perturb/plt/res/eb/extrapolation/res/checkpoints/20250116_1353_cellgen_train_masking_lr_0.001_wd_0.0001_batch_64_ptime_pos_sin_m_cosine_tp_1-2-3_s_42-epoch=49.ckpt' \
---src_dataset './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_src/Day 00-03.dataset' \
---tgt_dataset_folder './T_perturb/T_perturb/pp/res/eb/dataset_hvg_subsetted_tgt' \
---src_adata './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_src/Day 00-03.h5ad' \
---tgt_adata_folder './T_perturb/T_perturb/pp/res/eb/h5ad_pairing_hvg_tgt' \
+--ckpt_masking_path 'T_perturb/T_perturb/plt/res/eb/pbmc_median/extrapolation/checkpoints/20250117_1632_cellgen_train_masking_lr_0.001_wd_0.0001_batch_64_ptime_pos_sin_m_cosine_tp_1-2-3_s_42-epoch=49.ckpt' \
+--src_dataset 'T_perturb/T_perturb/pp/res/eb_pbmc_median/dataset_2000_hvg_src/Day 00-03.dataset' \
+--tgt_dataset_folder 'T_perturb/T_perturb/pp/res/eb_pbmc_median/dataset_2000_hvg_tgt' \
+--src_adata 'T_perturb/T_perturb/pp/res/eb_pbmc_median/h5ad_pairing_2000_hvg_src/Day 00-03.h5ad' \
+--tgt_adata_folder 'T_perturb/T_perturb/pp/res/eb_pbmc_median/h5ad_pairing_2000_hvg_tgt' \
 --mapping_dict_path  './T_perturb/T_perturb/pp/res/eb/token_id_to_genename_hvg.pkl' \
 --batch_size 64 \
---max_len 270 \
+--max_len 300 \
 --epochs 100 \
---tgt_vocab_size 1730 \
+--tgt_vocab_size 19679 \
 --cellgen_lr 0.001 \
 --count_lr 0.0001 \
 --cellgen_wd 0.0001 \
@@ -64,6 +64,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --var_list Time_point \
 --encoder scmaskgit \
 --context_mode True \
+--encoder_path "/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt" \
 --pos_encoding_mode time_pos_sin \
 --mask_scheduler 'cosine' \
 --d_model 768

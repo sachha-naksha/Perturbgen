@@ -338,6 +338,7 @@ def map_results_to_genes(
         len(marker_genes_ids.keys()),
         device=res.device,
     )
+
     marker_genes_dict = {}
     for i, gene in enumerate(marker_genes_ids.keys()):
         # extract cosine similarity for marker genes
@@ -668,15 +669,18 @@ def return_prediction_adata(
     # adata.var
     if gene_names is not None:
         test_var = pd.DataFrame(gene_names, columns=['gene_name'])
-    gene_embeddings_dict = {}
+    if len(test_dict['gene_embeddings']) > 0:
+        gene_embeddings_dict = {}
 
-    gene_embeddings = torch.cat(test_dict['gene_embeddings'], dim=0).numpy()
-    gene_embeddings_dict['gene_embeddings'] = gene_embeddings
+        gene_embeddings = torch.cat(test_dict['gene_embeddings'], dim=0).numpy()
+        gene_embeddings_dict['gene_embeddings'] = gene_embeddings
 
-    # save as pkl file for downstream analysis
-    with open(os.path.join(output_dir, f'{file_name}_gene_embeddings.pkl'), 'wb') as f:
-        pickle.dump(gene_embeddings_dict, f)
-    del gene_embeddings_dict
+        # save as pkl file for downstream analysis
+        with open(
+            os.path.join(output_dir, f'{file_name}_gene_embeddings.pkl'), 'wb'
+        ) as f:
+            pickle.dump(gene_embeddings_dict, f)
+        del gene_embeddings_dict
 
     adata = ad.AnnData(
         X=true_counts,
@@ -686,23 +690,24 @@ def return_prediction_adata(
             'cls_embeddings': cls_embeddings,
         },
         uns={
-            'marker_genes': marker_genes,
+            'marker_genes': marker_genes if marker_genes is not None else {},
         },
     )
     if gene_names is not None:
         adata.var_names = adata.var['gene_name']
         adata.var = adata.var.drop(columns=['gene_name'])
     adata.write_h5ad(os.path.join(output_dir, f'{file_name}.h5ad'))
-    # save cosine similarity separately due to large size
-    cos_similarity = torch.cat(test_dict['cosine_similarities'], dim=0).numpy()
-    cos_similarity_df = pd.DataFrame(cos_similarity, columns=marker_genes.keys())
-    # remove all non-expressed genes
-    cos_similarity_df = cos_similarity_df.loc[:, cos_similarity_df.sum() != 0]
-    # save as csv file for downstream analysis
-    cos_similarity_df.index = adata.obs.index
-    cos_similarity_df.to_csv(
-        os.path.join(output_dir, f'{file_name}_cosine_similarity.csv')
-    )
+    if len(test_dict['cosine_similarities']) > 0:
+        # save cosine similarity separately due to large size
+        cos_similarity = torch.cat(test_dict['cosine_similarities'], dim=0).numpy()
+        cos_similarity_df = pd.DataFrame(cos_similarity, columns=marker_genes.keys())
+        # remove all non-expressed genes
+        cos_similarity_df = cos_similarity_df.loc[:, cos_similarity_df.sum() != 0]
+        # save as csv file for downstream analysis
+        cos_similarity_df.index = adata.obs.index
+        cos_similarity_df.to_csv(
+            os.path.join(output_dir, f'{file_name}_cosine_similarity.csv')
+        )
     # adata.obsm['cosine_similarity'] = cos_similarity_df
     print('End saving embeddings---')
 

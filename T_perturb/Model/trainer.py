@@ -76,6 +76,7 @@ class CellGenTrainer(LightningModule):
         initial_lr: float = 1e-4,
         end_lr: float = 1e-3,
         return_embeddings: bool = False,
+        return_gene_embs: bool = False,
         return_attn: bool = False,
         generate: bool = False,
         pred_tps: list = [1, 2],
@@ -91,6 +92,10 @@ class CellGenTrainer(LightningModule):
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
         precision: Literal['high', 'medium'] = 'medium',
+        tokenid_to_rowid_path: str = (
+            'T_perturb/T_perturb/pp/res/hspc/tokenid_to_rowid_hvg.pkl'
+        ),
+        encoder_path: str | None = None,
         var_list: List[str] | None = None,
         gene_names: List[str] | None = None,
         mapping_dict_path: str | None = None,
@@ -123,6 +128,7 @@ class CellGenTrainer(LightningModule):
             context_tps=context_tps,
             n_total_tps=n_total_tps,
             encoder=encoder,
+            encoder_path=encoder_path,
             mask_scheduler=mask_scheduler,
             pos_encoding_mode=pos_encoding_mode,
             return_attn=return_attn,
@@ -150,12 +156,13 @@ class CellGenTrainer(LightningModule):
         else:
             self.gene_to_rowid = None
         with open(
-            './T_perturb/T_perturb/pp/res/hspc/tokenid_to_rowid_hvg.pkl',
+            tokenid_to_rowid_path,
             'rb',
         ) as f:
             tokenid_to_rowid = pickle.load(f)
         self.tokenid_to_rowid = tokenid_to_rowid
         self.return_embeddings = return_embeddings
+        self.return_gene_embs = return_gene_embs
         self.generate = generate
         self.tgt_vocab_size = tgt_vocab_size
 
@@ -207,6 +214,7 @@ class CellGenTrainer(LightningModule):
         self.date = datetime.now().strftime('%Y%m%d-%H:%M')
         self.return_attn = return_attn
         self.mask_scheduler = mask_scheduler
+        self.encoder = encoder
 
     def forward(self, batch):
         tgt_input_id_dict = {}
@@ -348,41 +356,47 @@ class CellGenTrainer(LightningModule):
                 token_ids = tgt_input_id_dict[f'tgt_input_ids_t{t}']
                 # 1. compute cosine similarity
                 cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
-                # load marker genes
-                with open(
-                    './T_perturb/T_perturb/plt/res/hspc/embeddings/'
-                    'res/cos_sim/top_genes_celltype_v2_10k.pkl',
-                    'rb',
-                ) as f:
-                    marker_genes = pickle.load(f)
-                # select keys MEMP, GMP and LMPP
-                marker_genes_ = {
-                    key: marker_genes[key] for key in ['MEMP', 'GMP', 'LMPP']
-                }
-                # concatenate all marker genes which are in a list
-                marker_genes_all = [
-                    gene for genes in marker_genes_.values() for gene in genes
-                ]
-                marker_genes_all = list(set(marker_genes_all))
-                # 2. map cosine similarity to corresponding genes
-                marker_cos_similarity, marker_genes_dict = map_results_to_genes(
-                    res=cos_similarity,
-                    mapping_dict=(
-                        self.gene_to_rowid if self.gene_to_rowid is not None else None
-                    ),
-                    token_ids=token_ids,
-                    marker_genes=marker_genes_all,
-                )
-                # take the non zero mean of the gene embeddings
-                gene_embeddings = return_gene_embeddings(
-                    # marker_genes=marker_genes,
-                    gene_embeddings=outputs[t]['dec_embedding'][:, 1:, :],
-                    mapping_dict=(
-                        self.gene_to_rowid if self.gene_to_rowid is not None else None
-                    ),
-                    token_ids=token_ids,
-                    marker_genes=marker_genes_all,
-                )
+
+                if self.return_gene_embs:
+                    # load marker genes
+                    with open(
+                        './T_perturb/T_perturb/plt/res/hspc/embeddings/'
+                        'res/cos_sim/top_genes_celltype_v2_10k.pkl',
+                        'rb',
+                    ) as f:
+                        marker_genes = pickle.load(f)
+                    # select keys MEMP, GMP and LMPP
+                    marker_genes_ = {
+                        key: marker_genes[key] for key in ['MEMP', 'GMP', 'LMPP']
+                    }
+                    # concatenate all marker genes which are in a list
+                    marker_genes_all = [
+                        gene for genes in marker_genes_.values() for gene in genes
+                    ]
+                    marker_genes_all = list(set(marker_genes_all))
+                    # 2. map cosine similarity to corresponding genes
+                    marker_cos_similarity, marker_genes_dict = map_results_to_genes(
+                        res=cos_similarity,
+                        mapping_dict=(
+                            self.gene_to_rowid
+                            if self.gene_to_rowid is not None
+                            else None
+                        ),
+                        token_ids=token_ids,
+                        marker_genes=marker_genes_all,
+                    )
+                    # take the non zero mean of the gene embeddings
+                    gene_embeddings = return_gene_embeddings(
+                        # marker_genes=marker_genes,
+                        gene_embeddings=outputs[t]['dec_embedding'][:, 1:, :],
+                        mapping_dict=(
+                            self.gene_to_rowid
+                            if self.gene_to_rowid is not None
+                            else None
+                        ),
+                        token_ids=token_ids,
+                        marker_genes=marker_genes_all,
+                    )
                 if self.return_attn:
                     context_tps = [tp for tp in self.context_tps if tp != t]
                     # extract context_ids
@@ -407,20 +421,23 @@ class CellGenTrainer(LightningModule):
                     cross_attn_weights = cross_attn_weights.mean(dim=0).detach().cpu()
                     self.test_dict['self_attn_weights'].append(self_attn_weights)
                     self.test_dict['cross_attn_weights'].append(cross_attn_weights)
-                self.marker_genes = marker_genes_dict
-                cos_similarity = marker_cos_similarity.detach().cpu()
-                cos_similarity = cos_similarity.to(torch.float16)
-                gene_embeddings = gene_embeddings.detach().cpu()
-                gene_embeddings = gene_embeddings.to(torch.float16)
+
+                if self.return_gene_embs:
+                    # gene embeddings
+                    gene_embeddings = gene_embeddings.detach().cpu()
+                    gene_embeddings = gene_embeddings.to(torch.float16)
+                    self.test_dict['gene_embeddings'].append(gene_embeddings)
+                    # cosine similarity
+                    self.marker_genes = marker_genes_dict
+                    cos_similarity = marker_cos_similarity.detach().cpu()
+                    cos_similarity = cos_similarity.to(torch.float16)
+                    self.test_dict['cosine_similarities'].append(cos_similarity)
                 true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
                 cls_embeddings = outputs[t]['mean_embedding'].detach().cpu()
                 # gene_embeddings = marker_gene_embeddings.detach().cpu()
                 combined_batch = batch['combined_batch'].detach().cpu()
                 self.test_dict['true_counts'].append(true_counts)
                 self.test_dict['cls_embeddings'].append(cls_embeddings)
-                self.test_dict['gene_embeddings'].append(gene_embeddings)
-                self.test_dict['cosine_similarities'].append(cos_similarity)
-                # self.test_dict['gene_embeddings'].append(gene_embeddings)
                 self.test_dict['batch'].append(combined_batch)
                 self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
                 if len(self.var_list) > 0:
@@ -458,7 +475,9 @@ class CellGenTrainer(LightningModule):
                 marker_genes=self.marker_genes,
                 gene_names=self.gene_names,
                 output_dir=self.output_dir,
-                file_name=f'{self.date}_prediction_embeddings',
+                file_name=f'{self.date}_inference_embs_'
+                f't{self.pred_tps}_{self.encoder}_'
+                f'm{self.mask_scheduler}',
                 n_total_tps=self.n_total_tps,
             )
 
@@ -496,6 +515,7 @@ class CountDecoderTrainer(LightningModule):
         mask_scheduler: str = 'cosine',
         sequence_length: int = 2048,
         return_rouge_score=True,
+        encoder_path: str | None = None,
         var_list: List[str] | None = None,
         tgt_adata: ad.AnnData | None = None,
         ckpt_masking_path: str | None = None,
@@ -532,6 +552,7 @@ class CountDecoderTrainer(LightningModule):
             context_tps=context_tps,
             n_total_tps=n_total_tps,
             encoder=encoder,
+            encoder_path=encoder_path,
             pos_encoding_mode=pos_encoding_mode,
         )
         self.pos_encoding_mode = pos_encoding_mode

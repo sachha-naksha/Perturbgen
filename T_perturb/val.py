@@ -237,6 +237,18 @@ def get_args():
         help='mode of encoder',
     )
     parser.add_argument(
+        '--encoder_path',
+        type=str,
+        default=None,
+        help='path to pre-trained encoder',
+    )
+    parser.add_argument(
+        '--tokenid_to_rowid_path',
+        type=str,
+        default=None,
+        help='path to tokenid to rowid mapping file',
+    )
+    parser.add_argument(
         '--seed',
         type=int,
         default=42,
@@ -385,6 +397,7 @@ def main() -> None:
         'output_dir': args.output_dir,
         'encoder': args.encoder,
         'var_list': args.var_list,
+        'encoder_path': args.encoder_path,
     }
     if args.test_mode == 'masking':
         test_kwargs['weight_decay'] = args.cellgen_wd
@@ -394,6 +407,7 @@ def main() -> None:
         test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
         test_kwargs['context_mode'] = args.context_mode
         test_kwargs['return_attn'] = args.return_attn
+        test_kwargs['tokenid_to_rowid_path'] = (args.tokenid_to_rowid_path,)
         pretrained_module = CellGenTrainer(**test_kwargs)
 
     elif args.test_mode == 'count':

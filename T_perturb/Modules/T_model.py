@@ -505,9 +505,12 @@ class scmaskgitwrapper(nn.Module):
 
         '''
         super(scmaskgitwrapper, self).__init__()
+        if model_path is None:
+            raise ValueError('Model path is required for scmaskgit encoder')
 
         self.model = scmoscf(
-            tgt_vocab_size=26717,
+            # tgt_vocab_size=26717,
+            tgt_vocab_size=20274,  # PBMC median
             d_model=768,
             num_heads=8,
             num_layers=6,
@@ -665,11 +668,7 @@ class CellGen(nn.Module):
         pad_token: int = 0,
         context_mode: bool = True,
         context_tps: List[int] | None = None,
-        model_path=(
-            '/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output2/'
-            'checkpoints/20250110_2325_cellgen_train_masking_lr_5e-05_wd_1e-06_batch'
-            '_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt'
-        ),
+        encoder_path: str | None = None,
     ):
         '''
         Description:
@@ -754,7 +753,7 @@ class CellGen(nn.Module):
             self.encoder_layers = Geneformerwrapper(mode=encoder)
         elif encoder == 'scmaskgit':
             print('-- Initializing scmaskgit model')
-            self.encoder_layers = scmaskgitwrapper(model_path)
+            self.encoder_layers = scmaskgitwrapper(encoder_path)
         elif encoder == 'Transformer_encoder':
             self.encoder_layers = Encoder(
                 total_vocab_size=tgt_vocab_size,

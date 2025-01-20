@@ -238,6 +238,12 @@ def get_args():
         help='mode of encoder',
     )
     parser.add_argument(
+        '--encoder_path',
+        default=None,
+        type=str,
+        help='mode of encoder',
+    )
+    parser.add_argument(
         '--pos_encoding_mode',
         type=str,
         default='time_pos_sin',
@@ -379,6 +385,7 @@ def main() -> None:
         'encoder': args.encoder,
         'output_dir': args.output_dir,
         'pos_encoding_mode': args.pos_encoding_mode,
+        'encoder_path': args.encoder_path,
     }
     if args.train_mode == 'masking':
         trainer_kwargs['dropout'] = args.cellgen_dropout
@@ -514,7 +521,7 @@ def main() -> None:
     early_stop_callback = pl.callbacks.EarlyStopping(
         monitor=monitor_metric,
         min_delta=0.00,
-        patience=10,
+        patience=20,
         verbose=False,
         mode=mode,
     )

@@ -46,6 +46,8 @@ def get_args():
         choices=[
             'cytoimmgen',
             'eb',
+            'eb_pbmc_median',
+            'eb_GF_26k_median',
             'mnc',
             'hspc',
             'hspc_pbmc_median',
@@ -367,7 +369,10 @@ print('Finished tokenisation.')
 # filter and save dataset by time point
 dataset = load_from_disk(f'{output_dir}/{file_name}.dataset')
 # load csv
-mapping_df = pd.read_csv('T_perturb/T_perturb/pp/res/hspc/cd34_pos_mapping.csv')
+if args.pairing_mode == 'mapping':
+    mapping_df = pd.read_csv('T_perturb/T_perturb/pp/res/hspc/cd34_pos_mapping.csv')
+else:
+    mapping_df = None
 adata_subset = sc.read_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
 
 # # Pairing resting to activated cells and tokenise individual datasets
