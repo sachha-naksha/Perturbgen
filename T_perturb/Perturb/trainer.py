@@ -422,9 +422,7 @@ class PerturberTrainer(CytoMeisterTrainer):
 
             perturbed_cls = perturbed_outputs[t]['dec_embedding'][:, 0, :]
             perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, 1:, :]
-            print(true_gene.shape)
-            print(perturbed_gene.shape)
-            raise
+
             # perturbed_logits = perturbed_outputs[t]['dec_logits'][:, 1:, :]
 
             # true_probs = torch.softmax(true_logits, dim=-1)

@@ -70,8 +70,8 @@ def get_args():
         '--split_obs',
         type=str,
         nargs='+',
-        # default=['Donor', 'Cell_type'],
-        default=['celltype_v2'],
+        default=['Donor', 'Cell_type'],
+        # default=['celltype_v2'],
     )
     parser.add_argument('--split_value', type=str, default='D351')
     parser.add_argument(
@@ -195,7 +195,7 @@ def get_args():
         '--pred_tps',
         nargs='+',
         type=int,
-        default=[1, 2, 3],
+        default=[1, 2, 3, 4],
         help='time steps which are predicted',
     )
     parser.add_argument(
@@ -211,8 +211,8 @@ def get_args():
         nargs='+',
         type=str,
         # default=['Time_point'],
-        # default=['Cell_population', 'Cell_type', 'Time_point', 'Donor'],
-        default=['celltype_v2', 'sex', 'phase', 'tissue', 'diff_state'],
+        default=['Cell_population', 'Cell_type', 'Time_point', 'Donor'],
+        # default=['celltype_v2', 'sex', 'phase', 'tissue', 'diff_state'],
         help='List of variables to keep in the dataset',
     )
     parser.add_argument(
@@ -413,6 +413,8 @@ def main() -> None:
         'pos_encoding_mode': args.pos_encoding_mode,
         'encoder_path': args.encoder_path,
         'condition_dict': condition_dict,
+        'temperature': args.temperature,
+        'iterations': args.iterations,
     }
     if args.train_mode == 'masking':
         trainer_kwargs['dropout'] = args.cellgen_dropout
@@ -498,7 +500,7 @@ def main() -> None:
             f'p{args.pos_encoding_mode}_m_{args.mask_scheduler}'
             f'_tp_{time_steps_str}_s_{args.seed}'
         )
-        if val_indices:
+        if val_indices is not None:
             monitor_metric = 'val/perplexity'
         else:
             monitor_metric = 'train/perplexity'

@@ -68,7 +68,13 @@ def get_args():
         type=float,
         default=0.1,
     )
-    parser.add_argument('--split_obs', type=str, default='Donor')
+    parser.add_argument(
+        '--split_obs',
+        type=str,
+        nargs='+',
+        default=None,
+        # default=['celltype_v2'],
+    )
     parser.add_argument('--split_value', type=str, default='D351')
     parser.add_argument(
         '--generate',
@@ -276,6 +282,18 @@ def get_args():
         default=512,
         help='embedding dimension',
     )
+    parser.add_argument(
+        '--deg_pkl_path',
+        type=str,
+        default=None,
+        help='path to deg pkl file',
+    )
+    parser.add_argument(
+        '--return_gene_embs',
+        type=str2bool,
+        default=False,
+        help='return gene embeddings',
+    )
 
     args = parser.parse_args()
     return args
@@ -312,7 +330,7 @@ def main() -> None:
                 tgt_adata=tgt_adata_tmp,
                 train_prop=args.train_prop,  # 0.8,0.1,0.1 train, val, test
                 test_prop=args.test_prop,
-                groups=['Cell_type', 'Donor'],
+                groups=args.split_obs,
                 seed=args.seed,
             )
 
@@ -422,16 +440,21 @@ def main() -> None:
         'var_list': args.var_list,
         'encoder_path': args.encoder_path,
         'condition_dict': condition_dict,
+        'temperature': args.temperature,
+        'iterations': args.iterations,
+        'sequence_length': args.sequence_length,
     }
     if args.test_mode == 'masking':
         test_kwargs['weight_decay'] = args.cellgen_wd
         test_kwargs['end_lr'] = args.cellgen_lr
         test_kwargs['return_embeddings'] = args.return_embeddings
+        test_kwargs['return_gene_embs'] = args.return_gene_embs
         test_kwargs['mapping_dict_path'] = args.mapping_dict_path
         test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
         test_kwargs['context_mode'] = args.context_mode
         test_kwargs['return_attn'] = args.return_attn
         test_kwargs['tokenid_to_rowid_path'] = args.tokenid_to_rowid_path
+        test_kwargs['deg_pkl_path'] = args.deg_pkl_path
         pretrained_module = CytoMeisterTrainer(**test_kwargs)
 
     elif args.test_mode == 'count':
@@ -442,10 +465,6 @@ def main() -> None:
         test_kwargs['lr'] = args.count_lr
         test_kwargs['conditions'] = conditions_
         test_kwargs['conditions_combined'] = conditions_combined_
-        test_kwargs['tgt_adata'] = tgt_adatas
-        test_kwargs['temperature'] = args.temperature
-        test_kwargs['iterations'] = args.iterations
-        test_kwargs['sequence_length'] = args.sequence_length
         test_kwargs['tgt_adata'] = tgt_adatas
         test_kwargs['n_samples'] = 3
         test_kwargs['seed'] = args.seed

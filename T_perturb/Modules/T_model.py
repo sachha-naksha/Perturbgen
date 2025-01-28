@@ -882,10 +882,6 @@ class CytoMeister(nn.Module):
             rand_int[tgt_pad] = 1
             batch_randperm = rand_int.argsort(dim=-1)
             mask = batch_randperm < rearrange(num_token_masked, 'b -> b 1')
-            # # concatenate CLS boolean mask
-            mask = torch.cat(
-                [torch.zeros((batch, 1), dtype=torch.bool, device=device), mask], dim=-1
-            )
             tgt_input_id[mask] = self.mask_token
             labels[~mask] = -100
         return tgt_input_id, labels
@@ -1182,7 +1178,7 @@ class CytoMeister(nn.Module):
                 - 'cls_embedding_t{t}': CLS token embeddings for time step t.
             - 'generate_id_dict': Dictionary of generated token ids.
         '''
-        generate_id_dict: Dict[int, torch.Tensor] = {}
+        generate_id_dict: Dict[str, torch.Tensor] = {}
         all_outputs: Dict[int, torch.Tensor] = {}
         if self.context_tps is not None:
             all_modelling_tps = self.pred_tps + self.context_tps
@@ -1236,7 +1232,7 @@ class CytoMeister(nn.Module):
                 tgt_time_step=time_step,
                 cond_length=cond_length,
             )
-            generate_id_dict[time_step] = generated_ids
+            generate_id_dict[f'tgt_input_ids_t{time_step}'] = generated_ids
             all_outputs[time_step] = outputs
         return all_outputs, generate_id_dict
 
@@ -1352,7 +1348,7 @@ class CytoMeister(nn.Module):
             scores_ = scores[:, cond_length:].clone()
             ids_to_keep_ = ids_to_keep[:, cond_length:].clone()
             # Create a mask of already predicted tokens
-            indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - 1, -1)
+            indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - cond_length, -1)
             logits.scatter_(2, indices, max_neg_value)
             filtered_logits = top_k(logits.clone(), topk_filter_thres)
             temperature = starting_temperature * (

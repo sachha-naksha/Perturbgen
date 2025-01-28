@@ -31,6 +31,7 @@ class PerturberMasking(CytoMeister):
         temperature: float = 2.0,  # keep in range 2.0-3.0
         # self_cond_prob=0.9,
         iterations: int = 18,  # optimal of iterations in MaskGIT
+        cond_length: int = 0,
         mask_scheduler: str = 'cosine',
         sequence_length: int | None = None,
         genes_to_perturb: List | None = None,
@@ -73,7 +74,7 @@ class PerturberMasking(CytoMeister):
             - 'count_output_t{t}': Count prediction for time step t.
             - 'cls_embedding_t{t}': CLS token embeddings for time step t.
         '''
-        generate_id_dict: Dict[int, torch.Tensor] = {}
+        generate_id_dict: Dict[str, torch.Tensor] = {}
         all_outputs: Dict[int, torch.Tensor] = {}
         if self.context_tps is not None:
             all_modelling_tps = self.pred_tps + self.context_tps
@@ -115,7 +116,7 @@ class PerturberMasking(CytoMeister):
                 prompt_length=prompt_length,
                 genes_to_perturb=genes_to_perturb,
             )
-            generate_id_dict[time_step] = generated_ids
+            generate_id_dict[f'tgt_input_ids_t{time_step}'] = generated_ids
             all_outputs[time_step] = outputs
         return all_outputs, generate_id_dict
 

@@ -787,21 +787,29 @@ def return_generation_adata(
     print('---Generating anndata')
     # TODO: clean up no if and else needed
     # adata.X
-    pred_counts = torch.cat(test_dict['pred_counts']).numpy()
+    if 'pred_counts' in test_dict.keys():
+        pred_counts = torch.cat(test_dict['pred_counts']).numpy()
     # adata.layers['counts']
-    true_counts = torch.cat(test_dict['true_counts']).numpy()
+    if 'true_counts' in test_dict.keys():
+        true_counts = torch.cat(test_dict['true_counts']).numpy()
     # adata.obsm
     cls_embeddings = torch.cat(test_dict['cls_embeddings']).numpy()
     # adata.obs
     obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
     test_obs = pd.DataFrame(obs_dict)
     # create adata
-    adata = ad.AnnData(
-        X=pred_counts,
-        obs=test_obs,
-        obsm={'cls_embeddings': cls_embeddings},
-        layers={'counts': true_counts},
-    )
+    if 'pred_counts' in test_dict.keys() and 'true_counts' in test_dict.keys():
+        adata = ad.AnnData(
+            X=pred_counts,
+            obs=test_obs,
+            obsm={'cls_embeddings': cls_embeddings},
+            layers={'counts': true_counts},
+        )
+    else:
+        adata = ad.AnnData(
+            obs=test_obs,
+            obsm={'cls_embeddings': cls_embeddings},
+        )
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata
