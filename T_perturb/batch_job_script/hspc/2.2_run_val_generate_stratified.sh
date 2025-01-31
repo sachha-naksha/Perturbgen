@@ -2,7 +2,7 @@
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
 #BSUB -gpu "mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB" # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB :gmodel=NVIDIA_H100_HBM3_80GB
 #BSUB -n 8 # number of cores
-#BSUB -G teamtrynka # groupname for billing
+#BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/return_generation_%J.out # output file
 #BSUB -e logs/return_generation_%J.err # error file
@@ -59,7 +59,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --cellgen_wd 0.00001 \
 --d_ff 64 \
 --num_layers 6 \
---n_workers 8 \
+--n_workers 4 \
 --pred_tps 1 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
 --cond_list celltype_v2 diff_state \

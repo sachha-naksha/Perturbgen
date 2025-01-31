@@ -593,8 +593,8 @@ def aggregate_attn_weights(
 
 
 def exclude_special_tokens(
-    mapping_dict: Dict,
-    marker_genes: Optional[List[str]] = None,
+    mapping_dict: dict,
+    marker_genes: list[str] | None = None,
 ):
     if marker_genes is not None:
         marker_genes_ids = {v: k for v, k in mapping_dict.items() if v in marker_genes}
@@ -608,6 +608,44 @@ def exclude_special_tokens(
             v: k for v, k in marker_genes_ids.items() if not v.startswith('cls')
         }
     return marker_genes_ids
+
+
+def mask_duplicates_across_batches(
+    aggregate_cell_idx: np.array,
+    cell_idx: np.array,
+):
+    if len(aggregate_cell_idx) == 0:
+        return (
+            np.ones(len(cell_idx), dtype=bool),
+            cell_idx,
+        )
+    else:
+        intersect = np.intersect1d(cell_idx, aggregate_cell_idx)
+        if len(intersect) > 0:
+            mask = np.isin(cell_idx, intersect)
+            inv_mask = ~mask
+            cell_idx = cell_idx[inv_mask]
+            # invert mask to exclude duplicates
+            return inv_mask, cell_idx
+        else:
+            return (
+                np.ones(len(cell_idx), dtype=bool),
+                cell_idx,
+            )
+
+
+def mask_duplicates_within_batches(
+    cell_idx: np.array,
+):
+    if len(set(cell_idx)) < len(cell_idx):
+        _, first_indices = np.unique(cell_idx, return_index=True)
+        # Create a mask where the first occurrence of each element is True
+        mask = np.zeros(len(cell_idx), dtype=bool)
+        mask[first_indices] = True
+
+        return mask, cell_idx[mask]
+    else:
+        return (np.ones(len(cell_idx), dtype=bool), cell_idx)
 
 
 def return_gene_embeddings(
@@ -665,6 +703,7 @@ def return_prediction_adata(
     output_dir: str,
     file_name: str,
     gene_names: list,
+    sum_gene_embs: dict | None = None,
 ):
     """
     Description:
@@ -713,17 +752,17 @@ def return_prediction_adata(
     # adata.var
     if gene_names is not None:
         test_var = pd.DataFrame(gene_names, columns=['gene_name'])
-    if len(test_dict['gene_embeddings']) > 0:
-        gene_embeddings_dict = {}
-        gene_embeddings = torch.cat(test_dict['gene_embeddings'], dim=0).numpy()
-        gene_embeddings_dict['gene_embeddings'] = gene_embeddings
+    # if len(test_dict['gene_embeddings']) > 0:
+    #     gene_embeddings_dict = {}
+    #     gene_embeddings = torch.cat(test_dict['gene_embeddings'], dim=0).numpy()
+    #     gene_embeddings_dict['gene_embeddings'] = gene_embeddings
 
-        # save as pkl file for downstream analysis
-        with open(
-            os.path.join(output_dir, f'{file_name}_gene_embeddings.pkl'), 'wb'
-        ) as f:
-            pickle.dump(gene_embeddings_dict, f)
-        del gene_embeddings_dict
+    #     # save as pkl file for downstream analysis
+    #     with open(
+    #         os.path.join(output_dir, f'{file_name}_gene_embeddings.pkl'), 'wb'
+    #     ) as f:
+    #         pickle.dump(gene_embeddings_dict, f)
+    #     del gene_embeddings_dict
 
     adata = ad.AnnData(
         X=true_counts,
@@ -736,9 +775,14 @@ def return_prediction_adata(
             'marker_genes': marker_genes if marker_genes is not None else {},
         },
     )
+    if sum_gene_embs is not None:
+        for condition in sum_gene_embs.keys():
+            adata.varm[condition] = sum_gene_embs[condition]
     if gene_names is not None:
         adata.var_names = adata.var['gene_name']
         adata.var = adata.var.drop(columns=['gene_name'])
+    print('final adata', adata)
+    raise
     adata.write_h5ad(os.path.join(output_dir, f'{file_name}.h5ad'))
     if len(test_dict['cosine_similarities']) > 0:
         # save cosine similarity separately due to large size

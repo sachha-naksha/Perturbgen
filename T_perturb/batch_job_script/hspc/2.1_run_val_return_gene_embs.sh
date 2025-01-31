@@ -6,8 +6,8 @@
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/return_gene_embed_%J.out # output file
 #BSUB -e logs/return_gene_embed_%J.err # error file
-#BSUB -M 750000  # RAM memory part 2. Default: 100MB
-#BSUB -R "select[mem>750000] rusage[mem=750000]" # RAM memory part 1. Default: 100MB
+#BSUB -M 250000  # RAM memory part 2. Default: 100MB
+#BSUB -R "select[mem>250000] rusage[mem=250000]" # RAM memory part 1. Default: 100MB
 #BSUB -J return_gene_embed_scmaskgit # job name
 
 # load cuda
@@ -48,7 +48,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --src_adata "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_src/stem.h5ad" \
 --tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_tgt" \
 --mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc_pbmc_median/token_id_to_genename_10000_hvg.pkl" \
---batch_size 4 \
+--batch_size 64 \
 --max_len 2200 \
 --tgt_vocab_size 5710 \
 --cellgen_lr 0.00001 \
@@ -69,9 +69,10 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --pos_encoding_mode 'time_pos_sin' \
 --d_model 768 \
 --return_gene_embs True \
---gene_embs_condition 'celltype_v2' \
---deg_pkl_path 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/figures/20250126_top250_DEG_lmpptissue_v_lmpprest_10k.pkl'
+--gene_embs_condition 'celltype_v2'
 echo "--- Finished computing model"
+
+# --deg_pkl_path 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/figures/20250126_top250_DEG_lmpptissue_v_lmpprest_10k.pkl'
 
 # PBMC median
 # --encoder_path '/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt' \
