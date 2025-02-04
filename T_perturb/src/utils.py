@@ -198,6 +198,14 @@ def condition_for_count_loss(
     )
 
 
+def get_idx_for_filtering(
+    dataset: DatasetDict,
+    condition: list[str],
+    variable: str,
+):
+    return [i for i, val in enumerate(dataset[variable]) if val in condition]
+
+
 def concat_cond_tokens(
     time_points: list[int],
     batch: dict,
@@ -229,6 +237,7 @@ def concat_cond_tokens(
                     cond_ids[:, j] = torch.tensor(
                         condition_tokens, dtype=torch.long, device=device
                     )
+
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = torch.cat(
                 (cond_ids, tgt_input_id), dim=1
             )
@@ -781,8 +790,6 @@ def return_prediction_adata(
     if gene_names is not None:
         adata.var_names = adata.var['gene_name']
         adata.var = adata.var.drop(columns=['gene_name'])
-    print('final adata', adata)
-    raise
     adata.write_h5ad(os.path.join(output_dir, f'{file_name}.h5ad'))
     if len(test_dict['cosine_similarities']) > 0:
         # save cosine similarity separately due to large size

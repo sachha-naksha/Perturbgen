@@ -3,6 +3,7 @@
 import argparse
 import os
 import uuid
+import warnings
 from datetime import datetime
 
 import pytorch_lightning as pl
@@ -16,6 +17,7 @@ from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
 from T_perturb.Model.trainer import CountDecoderTrainer, CytoMeisterTrainer
 from T_perturb.src.utils import (
     condition_for_count_loss,
+    get_idx_for_filtering,
     randomised_split,
     read_dataset_files,
     str2bool,
@@ -300,7 +302,19 @@ def get_args():
         default=None,
         help='aggregate gene embeddings over condition',
     )
-
+    parser.add_argument(
+        '--filter_cond',
+        type=str,
+        nargs='+',
+        default=None,
+        help='condition to filter tgt datasets',
+    )
+    parser.add_argument(
+        '--filter_var',
+        type=str,
+        default=None,
+        help='covariate to filter tgt datasets',
+    )
     args = parser.parse_args()
     return args
 
@@ -326,9 +340,122 @@ def main() -> None:
     src_dataset = load_from_disk(args.src_dataset)
     src_adata = sc.read_h5ad(args.src_adata)
 
+    if args.loss_mode == 'mse':
+        # log normalize data only for mse loss
+        sc.pp.normalize_total(src_adata, target_sum=1e4)
+        sc.pp.log1p(src_adata)
+        for _, tgt_adata in tgt_adatas.items():
+            sc.pp.normalize_total(tgt_adata, target_sum=1e4)
+            sc.pp.log1p(tgt_adata)
+
+    # Classifier-free guidance pre-processing
+    # ---------------------------------------
+    # create dictionnary of metadata for classifier-free guidance
+    # needs to be completed before any filtering to initialize
+    # all condition tokens
+    token_no = args.tgt_vocab_size
+    if args.cond_list is not None:
+        full_dataset = concatenate_datasets([src_dataset] + list(tgt_datasets.values()))
+        condition_dict = {}
+        for condition in args.cond_list:
+            condition_dict[condition] = {
+                cell_type: i + token_no
+                for i, cell_type in enumerate(full_dataset.unique(condition))
+            }
+            token_no += len(condition_dict[condition])
+    else:
+        condition_dict = None
+
+    # 1. Filter datasets based on condition, if available
+    # 2. Extract condition to return gene embeddings
+    # ---------------------------------------------------
+
+    # create full dataset to extract metadata for conditioning
+    filter_idx = []
+    # filter dataset based on condition
+    if (args.filter_var is not None) and (args.filter_cond is not None):
+        for dataset in tgt_datasets.values():
+            idx_ = get_idx_for_filtering(
+                dataset,
+                args.filter_cond,
+                args.filter_var,
+            )
+            # if len(filter_idx) == 0:
+            #     filtered_dataset = None
+            # else:
+            #     filtered_dataset = dataset.select(idx_)
+            filter_idx.extend(idx_)
+
+    if len(filter_idx) > 0:
+        # apply condition filter to all datasets
+        filter_idx = list(set(filter_idx))
+        for i in range(len(tgt_datasets)):
+            t = i + 1
+            tgt_dataset = tgt_datasets[f'tgt_dataset_t{t}']
+            tgt_adata = tgt_adatas[f'tgt_h5ad_t{t}']
+            tgt_dataset = tgt_dataset.select(filter_idx)
+            tgt_datasets[f'tgt_dataset_t{t}'] = tgt_dataset
+            tgt_adata = tgt_adata[filter_idx, :]
+            tgt_adatas[f'tgt_h5ad_t{t}'] = tgt_adata
+        # for i, dataset in tgt_datasets.items():
+        #     tgt_datasets[i] = dataset.select(filter_idx)
+        src_dataset = src_dataset.select(filter_idx)
+        src_adata = src_adata[filter_idx, :]
+        if args.gene_embs_condition is not None:
+            # filter for keys which are in pred_tps
+            pred_dataset = {
+                key: tgt_datasets[key]
+                for key in tgt_datasets
+                if key in {f'tgt_dataset_t{tp}' for tp in args.pred_tps}
+            }
+            all_pred_dataset = concatenate_datasets(list(pred_dataset.values()))
+            # check if filter_cond is the same as all_pred_dataset
+            all_pred_condition = all_pred_dataset.unique(args.filter_var)
+            if all_pred_condition != args.filter_cond:
+                warnings.warn(
+                    f'Filtering gene embs for {all_pred_condition} '
+                    f'instead of only {args.filter_cond} '
+                    f'if this is not the intended behaviour, please select the '
+                    f'corresponding pred_tps for the gene embs condition '
+                )
+            gene_embs_list = all_pred_dataset.unique(args.gene_embs_condition)
+            print(
+                f'Return gene embs for {gene_embs_list} '
+                f'in condition {args.gene_embs_condition} '
+                f'filtered for {all_pred_condition}.'
+            )
+    else:
+        if args.gene_embs_condition is not None:
+            full_tgt_dataset = concatenate_datasets(list(tgt_datasets.values()))
+            gene_embs_list = full_tgt_dataset.unique(args.gene_embs_condition)
+            print(
+                f'Return gene embs for {gene_embs_list} '
+                f'in {args.gene_embs_condition}.'
+            )
+        else:
+            gene_embs_list = None
+
     # use the tmp adata for all operation
     # where the metadata and information is shared across timepoints
     tgt_adata_tmp = tgt_adatas[f'tgt_h5ad_t{args.pred_tps[0]}'].copy()
+
+    # ZINB and NB count loss preprocessing
+    # ------------------------------------
+
+    (
+        conditions,
+        condition_encodings,
+        conditions_combined,
+        conditions_,
+        condition_keys_,
+        conditions_combined_,
+    ) = condition_for_count_loss(
+        args.condition_keys, args.conditions, args.conditions_combined, tgt_adata_tmp
+    )
+
+    print('Data loaded and preprocessed.')
+    # Preparing train-test split
+    # --------------------------
     if args.split:
         if args.splitting_mode == 'stratified':
             # start preprocessing to avoid loading anndata into datamodule
@@ -375,61 +502,13 @@ def main() -> None:
     subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
         train_indices
     )
-    assert (
-        subset_adata.obs['cell_pairing_index'].tolist()
-        == subset_dataset['cell_pairing_index']
+    adata_idx = subset_adata.obs['index'].tolist()
+    dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
+    assert adata_idx == dataset_idx, (
+        'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
     )
-
-    if args.loss_mode == 'mse':
-        # log normalize data only for mse loss
-        sc.pp.normalize_total(src_adata, target_sum=1e4)
-        sc.pp.log1p(src_adata)
-        for _, tgt_adata in tgt_adatas.items():
-            sc.pp.normalize_total(tgt_adata, target_sum=1e4)
-            sc.pp.log1p(tgt_adata)
-
-    # ZINB and NB count loss preprocessing
-    # ----------------------------------------------------------------------------------
-
-    (
-        conditions,
-        condition_encodings,
-        conditions_combined,
-        conditions_,
-        condition_keys_,
-        conditions_combined_,
-    ) = condition_for_count_loss(
-        args.condition_keys, args.conditions, args.conditions_combined, tgt_adata_tmp
-    )
-    print('Data loaded and preprocessed.')
     # count number of unique timepoints
-
     n_total_tps = len(tgt_adatas)
-
-    # create dictionnary of metadata for classifier-free guidance
-    token_no = args.tgt_vocab_size
-
-    # create full dataset to extract metadata for conditioning
-    tgt_dataset_list = []
-    for dataset in tgt_datasets.values():
-        tgt_dataset_list.append(dataset)
-    if args.gene_embs_condition is not None:
-        full_tgt_dataset = concatenate_datasets(tgt_dataset_list)
-        gene_embs_list = full_tgt_dataset.unique(args.gene_embs_condition)
-    else:
-        gene_embs_list = None
-    full_dataset = concatenate_datasets([src_dataset] + tgt_dataset_list)
-    if args.cond_list is not None:
-        condition_dict = {}
-        for condition in args.cond_list:
-            condition_dict[condition] = {
-                cell_type: i + token_no
-                for i, cell_type in enumerate(full_dataset.unique(condition))
-            }
-            token_no += len(condition_dict[condition])
-    else:
-        condition_dict = None
-
     # Initialize model module
     # ----------------------------------------------------------------------------------
     test_kwargs = {

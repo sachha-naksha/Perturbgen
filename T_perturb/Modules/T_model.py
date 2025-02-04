@@ -1043,10 +1043,14 @@ class CytoMeister(nn.Module):
         outputs: `dict`
             Output dictionary
         '''
+        if self.context_tps is None:
+            all_modelling_tps = self.pred_tps
+        else:
+            all_modelling_tps = self.context_tps + self.pred_tps
         if tgt_input_id_dict:
             tgt_pad_dict = self.call_padding(
                 tgt_input_id_dict,
-                self.pred_tps,
+                all_modelling_tps,
             )
         else:
             tgt_pad_dict = generate_pad_dict
@@ -1055,12 +1059,13 @@ class CytoMeister(nn.Module):
         if (not_masked) and (tgt_input_id_dict is not None):
             # not masked for count prediction and predicted embeddings
             sorted_time_steps = sorted(self.pred_tps)
-            context_time_steps = sorted_time_steps
-        elif not_masked is False:
-            if self.context_tps is not None:
-                context_time_steps = sorted(self.context_tps)
-            else:
-                context_time_steps = sorted(self.pred_tps)
+            context_time_steps = (
+                sorted(self.context_tps) if self.context_tps else sorted_time_steps
+            )
+        if not_masked is False:
+            context_time_steps = (
+                sorted(self.context_tps) if self.context_tps else sorted(self.pred_tps)
+            )
             if tgt_time_step is None:
                 # randomly select a time step for training
                 sorted_time_steps = [np.random.choice(self.pred_tps)]

@@ -58,7 +58,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --d_ff 64 \
 --num_layers 6 \
 --n_workers 8 \
---pred_tps 1 2 \
+--pred_tps 1 \
+--context_tps 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
 --cond_list celltype_v2 diff_state \
 --encoder scmaskgit \
@@ -69,7 +70,9 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --pos_encoding_mode 'time_pos_sin' \
 --d_model 768 \
 --return_gene_embs True \
---gene_embs_condition 'celltype_v2'
+--gene_embs_condition 'tissue' \
+--filter_cond 'LMPP' \
+--filter_var 'celltype_v2'
 echo "--- Finished computing model"
 
 # --deg_pkl_path 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/figures/20250126_top250_DEG_lmpptissue_v_lmpprest_10k.pkl'

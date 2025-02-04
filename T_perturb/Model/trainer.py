@@ -284,12 +284,8 @@ class CytoMeisterTrainer(LightningModule):
                 raise ValueError('gene_embs_list is None')
 
     def forward(self, batch, generate: bool = False):
-        if generate:
-            time_points = self.total_tps
-        else:
-            time_points = self.pred_tps
         tgt_input_id_dict = concat_cond_tokens(
-            time_points=time_points,
+            time_points=self.total_tps,
             condition_dict=self.condition_dict,
             batch=batch,
         )
@@ -555,8 +551,9 @@ class CytoMeisterTrainer(LightningModule):
                         # count number of non zero gene
                         # embeddings along the batch dimension
                         self.count_gene_embs[condition] += non_zero_counts.unsqueeze(1)
-                # self.test_dict['gene_embeddings'].append(gene_embeddings)
-                # cosine similarity
+            # self.test_dict['gene_embeddings'].append(gene_embeddings)
+            # cosine similarity
+            if self.generate:
                 if self.return_rouge_score:
                     pred_ids = (
                         tgt_input_id_dict[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
@@ -667,14 +664,13 @@ class CytoMeisterTrainer(LightningModule):
                             self.test_dict[f'rouge1_{seq_len}']
                         )
                         rouge_dict[f'rouge1_{seq_len}'] = np.mean(rouge_score, axis=0)
-
-            metrics = pd.DataFrame(rouge_dict, index=[0])
-            metrics.to_csv(
-                f'{self.output_dir}/{self.date}_'
-                f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
-                f'_s{self.sequence_length}_metrics.csv'
-            )
-            print('---Rouge score saved')
+                metrics = pd.DataFrame(rouge_dict, index=[0])
+                metrics.to_csv(
+                    f'{self.output_dir}/{self.date}_'
+                    f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
+                    f'_s{self.sequence_length}_metrics.csv'
+                )
+                print('---Rouge score saved')
 
 
 class CountDecoderTrainer(LightningModule):
@@ -859,12 +855,8 @@ class CountDecoderTrainer(LightningModule):
         self.condition_dict = condition_dict
 
     def forward(self, batch, generate: bool = False):
-        if generate:
-            time_points = self.total_tps
-        else:
-            time_points = self.pred_tps
         tgt_input_id_dict = concat_cond_tokens(
-            time_points=time_points,
+            time_points=self.total_tps,
             condition_dict=self.condition_dict,
             batch=batch,
         )

@@ -1,13 +1,13 @@
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu "mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB" # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB :gmodel=NVIDIA_H100_HBM3_80GB
+#BSUB -gpu "mode=exclusive_process:num=1" # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB :gmodel=NVIDIA_H100_HBM3_80GB
 #BSUB -n 8 # number of cores
 #BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/return_generation_%J.out # output file
 #BSUB -e logs/return_generation_%J.err # error file
-#BSUB -M 100000  # RAM memory part 2. Default: 100MB
-#BSUB -R "select[mem>100000] rusage[mem=100000]" # RAM memory part 1. Default: 100MB
+#BSUB -M 25000  # RAM memory part 2. Default: 100MB
+#BSUB -R "select[mem>25000] rusage[mem=25000]" # RAM memory part 1. Default: 100MB
 #BSUB -J return_generation_scmaskgit # job name
 
 # load cuda

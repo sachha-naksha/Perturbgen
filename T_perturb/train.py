@@ -344,9 +344,10 @@ def main() -> None:
     subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
         train_indices
     )
-    assert (
-        subset_adata.obs['cell_pairing_index'].tolist()
-        == subset_dataset['cell_pairing_index']
+    adata_idx = subset_adata.obs['index'].tolist()
+    dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
+    assert adata_idx == dataset_idx, (
+        'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
     )
     if args.loss_mode == 'mse':
         # log normalize data only for mse loss
