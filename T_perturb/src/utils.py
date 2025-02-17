@@ -253,16 +253,18 @@ def compute_rouge_score(
     rouge_len_list: list[int],
     max_seq_length: int,
     test_dict: dict[str, list],
+    cond_length: int | None = None,
 ) -> dict[str, list[float]]:
     # Convert predictions and targets to object type for string replacement
     pred_ids = pred_ids.astype(object)
     tgt_ids = tgt_ids.astype(object)
 
-    # Exclude task token (assumed to be the first token)
-    pred_ids = pred_ids[:, 1:]
+    # # Exclude task token (assumed to be the first token)
+    pred_ids = pred_ids[:, cond_length:]
 
     # Define special tokens to remove (e.g., 0, 1, 2, 3)
     special_tokens = np.array([0, 1, 2, 3])
+
     pred_ids[np.isin(pred_ids, special_tokens)] = ''
     tgt_ids[np.isin(tgt_ids, special_tokens)] = ''
 
@@ -289,11 +291,14 @@ def compute_rouge_score(
 
         # Remove extra spaces
         pred_ids_str = np.array([' '.join(s.split()) for s in pred_ids_str])
+        pred_ids_str = pred_ids_str.tolist()
         tgt_ids_str = np.array([' '.join(s.split()) for s in tgt_ids_str])
+        tgt_ids_str = tgt_ids_str.tolist()
+
         # Compute ROUGE score for the entire batch at once
         rouge_result = rouge.compute(
-            predictions=pred_ids_str.tolist(),
-            references=tgt_ids_str.tolist(),
+            predictions=pred_ids_str,
+            references=tgt_ids_str,
             rouge_types=['rouge1'],
             use_aggregator=False,
         )
@@ -868,6 +873,12 @@ def return_generation_adata(
             obs=test_obs,
             obsm={'cls_embeddings': cls_embeddings},
         )
+    if 'true_embeddings' in test_dict.keys():
+        true_embeddings = torch.cat(test_dict['true_embeddings']).numpy()
+        adata.obsm['true_embeddings'] = true_embeddings
+    print(adata.obsm['true_embeddings'].shape)
+    print(adata)
+    raise
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata

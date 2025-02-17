@@ -92,6 +92,7 @@ class CytoMeisterTrainer(LightningModule):
         iterations: int = 18,
         sequence_length: int = 2048,
         return_rouge_score: bool = True,
+        return_true_embs: bool = True,
         output_dir: str = './T_perturb/T_perturb/plt/res/eb/',
         encoder: str = 'GF_fine_tuned',
         mask_scheduler: str = 'cosine',
@@ -185,6 +186,7 @@ class CytoMeisterTrainer(LightningModule):
         self.context_mode = context_mode
 
         self.test_dict: Dict[str, List[Any]] = {
+            'true_embeddings': [],
             'true_counts': [],
             'cls_embeddings': [],
             'cosine_similarities': [],
@@ -248,6 +250,7 @@ class CytoMeisterTrainer(LightningModule):
 
         # generation parameters
         self.return_rouge_score = return_rouge_score
+        self.return_true_embs = return_true_embs
         self.temperature = temperature
         self.iterations = iterations
         self.sequence_length = sequence_length
@@ -442,6 +445,10 @@ class CytoMeisterTrainer(LightningModule):
         else:
             cond_length = 0
         if self.generate:
+            outputs, tgt_input_id_dict = self.forward(
+                batch,
+                generate=self.generate,
+            )
             decoder_kwargs = {
                 'src_input_id': batch['src_input_ids'],
                 'tgt_input_id_dict': tgt_input_id_dict,
@@ -554,6 +561,16 @@ class CytoMeisterTrainer(LightningModule):
             # self.test_dict['gene_embeddings'].append(gene_embeddings)
             # cosine similarity
             if self.generate:
+                if self.return_true_embs:
+                    true_outputs, _ = self.forward(
+                        batch,
+                        generate=False,
+                    )
+                    true_embs = true_outputs[t]['mean_embedding'].detach().cpu()
+                    true_embs = true_embs[dupl_outside_batch]
+                    true_embs = true_embs[dupl_within_batch]
+                    self.test_dict['true_embeddings'].append(true_embs)
+
                 if self.return_rouge_score:
                     pred_ids = (
                         tgt_input_id_dict[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
@@ -1163,6 +1180,7 @@ class CountDecoderTrainer(LightningModule):
             batch,
             generate=self.generate,
         )
+
         if self.condition_dict is not None:
             cond_length = len(self.condition_dict)
 

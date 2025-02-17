@@ -1,6 +1,6 @@
 #!/bin/bash
-#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu "mode=exclusive_process:num=1" # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB :gmodel=NVIDIA_H100_HBM3_80GB
+#BSUB -q gpu-huge # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -gpu "mode=exclusive_process:num=1:gmodel=NVIDIAA100_SXM4_80GB" # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB :gmodel=NVIDIA_H100_HBM3_80GB
 #BSUB -n 8 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
@@ -8,7 +8,7 @@
 #BSUB -e logs/return_gene_embed_%J.err # error file
 #BSUB -M 250000  # RAM memory part 2. Default: 100MB
 #BSUB -R "select[mem>250000] rusage[mem=250000]" # RAM memory part 1. Default: 100MB
-#BSUB -J return_gene_embed_scmaskgit # job name
+#BSUB -J return_gene_embed # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -58,8 +58,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --d_ff 64 \
 --num_layers 6 \
 --n_workers 8 \
---pred_tps 1 \
---context_tps 2 \
+--pred_tps 1 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
 --cond_list celltype_v2 diff_state \
 --encoder scmaskgit \
@@ -70,9 +69,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --pos_encoding_mode 'time_pos_sin' \
 --d_model 768 \
 --return_gene_embs True \
---gene_embs_condition 'tissue' \
---filter_cond 'LMPP' \
---filter_var 'celltype_v2'
+--gene_embs_condition 'diff_state'
 echo "--- Finished computing model"
 
 # --deg_pkl_path 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/figures/20250126_top250_DEG_lmpptissue_v_lmpprest_10k.pkl'

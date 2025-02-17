@@ -201,7 +201,7 @@ def get_args():
         default='cosine',
         help='mask scheduler [cosine, exp, pow]',
     )
-    parser.add_argument('--temperature', type=float, default=1.0, help='temperature')
+    parser.add_argument('--temperature', type=float, default=0.5, help='temperature')
     parser.add_argument('--sequence_length', type=int, default=150, help='iterations')
     parser.add_argument('--iterations', type=int, default=20, help='iterations')
     parser.add_argument('--conditions', type=dict, default=None, help='conditions')
@@ -424,6 +424,8 @@ def main() -> None:
                 f'in condition {args.gene_embs_condition} '
                 f'filtered for {all_pred_condition}.'
             )
+        else:
+            gene_embs_list = None
     else:
         if args.gene_embs_condition is not None:
             full_tgt_dataset = concatenate_datasets(list(tgt_datasets.values()))
@@ -588,7 +590,7 @@ def main() -> None:
         'tgt_counts_dict': tgt_counts_dict,
         'train_indices': train_indices,
         'val_indices': val_indices,
-        'test_indices': test_indices,
+        'test_indices': train_indices,  # TODO: change back to test_indices
         'pred_tps': args.pred_tps,
         'context_tps': args.context_tps,
         'n_total_tps': n_total_tps,

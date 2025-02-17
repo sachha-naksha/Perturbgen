@@ -8,7 +8,7 @@
 #BSUB -e logs/return_generation_%J.err # error file
 #BSUB -M 25000  # RAM memory part 2. Default: 100MB
 #BSUB -R "select[mem>25000] rusage[mem=25000]" # RAM memory part 1. Default: 100MB
-#BSUB -J return_generation_scmaskgit # job name
+#BSUB -J return_generation # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -60,7 +60,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --d_ff 64 \
 --num_layers 6 \
 --n_workers 4 \
---pred_tps 1 2 \
+--pred_tps 1 \
+--context_tps 2 \
 --var_list sex phase tissue celltype_v2 diff_state \
 --cond_list celltype_v2 diff_state \
 --encoder scmaskgit \
@@ -69,6 +70,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --context_mode True \
 --mask_scheduler 'cosine' \
 --pos_encoding_mode 'time_pos_sin' \
+--filter_cond LMPP \
+--filter_var celltype_v2 \
 --d_model 768
 echo "--- Finished computing model"
 
