@@ -31,11 +31,15 @@ class PerturberTrainer(CytoMeisterTrainer):
         iterations: int = 18,
         mapping_dict_path: str | None = None,
         genes_to_perturb: List[str] | None = None,
-        tokens_to_perturb: List[int] | None = None,
+        src_tokens_to_perturb: List[int] | None = None,
+        tgt_tokens_to_perturb: List[int] | None = None,
         validation_mode: Literal['inference', 'generate'] | None = None,
         perturbation_mode: Literal['mask', 'pad', 'delete', 'overexpress']
         | None = None,
         perturbation_sequence: Literal['src', 'tgt'] | None = None,
+        tokenid_to_rowid_path: str = (
+            'T_perturb/T_perturb/pp/res/hspc/tokenid_to_rowid_hvg.pkl'
+        ),
         # gene_module_list: List[str] | None = None,
         # num_of_background_genes: int | None = None,
         *args,
@@ -59,17 +63,17 @@ class PerturberTrainer(CytoMeisterTrainer):
             #     self.gene_module_list: List[str] | None = gene_module_list
             #     if num_of_background_genes is None:
             #         raise ValueError('Please specify the number of background genes')
-            #     # exclude special tokens from self.gene_to_rowid
+            #     # exclude special tokens from self.gene_to_tgtid
             #     gene_tokens_filtered = {
             #         gene: token
-            #         for gene, token in self.gene_to_rowid.items()
+            #         for gene, token in self.gene_to_tgtid.items()
             #         if gene not in self.special_tokens
             #     }
             #     # exclude perturbation tokens from gene_tokens_filtered
             #     gene_tokens_filtered = {
             #         gene: token
             #         for gene, token in gene_tokens_filtered.items()
-            #         if token not in self.perturbation_tokens
+            #         if token not in self.tgt_pert_tokens
             #     }
             #     self.gene_module_dict = {
             #         gene: gene_tokens_filtered[gene] for gene in gene_module_list
@@ -93,40 +97,72 @@ class PerturberTrainer(CytoMeisterTrainer):
             #     self.background_gene_dict = dict(random_entries)
             # else:
             #     self.gene_module_list = None
-
+        # dictionary to map gene names to row ids in tgt
         if mapping_dict_path is not None:
             with open(
                 mapping_dict_path,
                 'rb',
             ) as f:
-                tokenid_to_gene = pickle.load(f)
-            gene_to_rowid = {v: k for k, v in tokenid_to_gene.items()}
-            self.gene_to_rowid = gene_to_rowid
+                rowid_to_gene = pickle.load(f)
+            gene_to_rowid = {v: k for k, v in rowid_to_gene.items()}
+            self.gene_to_tgtid = gene_to_rowid
+
             # find corresponding special for dictionary keys '<>'
-            special_tokens = [
-                k for k, v in tokenid_to_gene.items() if v.startswith('<')
-            ]
+            special_tokens = [k for k, v in rowid_to_gene.items() if v.startswith('<')]
             self.special_tokens = special_tokens
-        if genes_to_perturb is not None:
-            self.genes_to_perturb: List[str] | None = genes_to_perturb
-            perturbation_tokens = [gene_to_rowid[gene] for gene in genes_to_perturb]
-            perturbation_tokens = torch.tensor(perturbation_tokens, dtype=torch.long)
-        elif tokens_to_perturb is not None:
-            self.genes_to_perturb = None
-            perturbation_tokens = torch.tensor(tokens_to_perturb, dtype=torch.long)
+        # dictionary to map gene names to row ids in src
+        with open(
+            tokenid_to_rowid_path,
+            'rb',
+        ) as f:
+            tokenid_to_rowid = pickle.load(f)
+            rowid_to_tokenid = {v: k for k, v in tokenid_to_rowid.items()}
+            # map back rowid to original tokenid
+            gene_to_srcid = {
+                k: rowid_to_tokenid[gene_to_rowid[k]]
+                for k in gene_to_rowid
+                if gene_to_rowid[k] in rowid_to_tokenid
+            }
+
+        if perturbation_sequence is not None:
+            if 'src' in perturbation_sequence:
+                tgt_pert_tokens = None
+                self.tgt_pert_tokens = tgt_pert_tokens
+                if genes_to_perturb is not None:
+                    src_pert_tokens = [gene_to_srcid[gene] for gene in genes_to_perturb]
+                    src_pert_tokens = torch.tensor(src_pert_tokens, dtype=torch.long)
+                elif src_tokens_to_perturb is not None:
+                    src_pert_tokens = torch.tensor(
+                        src_tokens_to_perturb, dtype=torch.long
+                    )
+                else:
+                    raise ValueError(
+                        'Please specify either genes_to_perturb or tokens_to_perturb'
+                    )
+                self.register_buffer(
+                    'src_pert_tokens', src_pert_tokens, persistent=False
+                )
+            elif 'tgt' in perturbation_sequence:
+                if genes_to_perturb is not None:
+                    tgt_pert_tokens = [gene_to_rowid[gene] for gene in genes_to_perturb]
+                    tgt_pert_tokens = torch.tensor(tgt_pert_tokens, dtype=torch.long)
+                elif tgt_tokens_to_perturb is not None:
+                    tgt_pert_tokens = torch.tensor(
+                        tgt_tokens_to_perturb, dtype=torch.long
+                    )
+                else:
+                    raise ValueError(
+                        'Please specify either genes_to_perturb or tokens_to_perturb'
+                    )
+            self.genes_to_perturb = genes_to_perturb
         else:
-            raise ValueError(
-                'Please specify either genes_to_perturb or tokens_to_perturb'
-            )
-        self.register_buffer(
-            'perturbation_tokens', perturbation_tokens, persistent=False
-        )
+            raise ValueError('Please specify the perturbation_sequence: "src" or "tgt"')
+
         print(
             f'Start perturbation ...\n'
             f'- Validation mode: {self.validation_mode}\n'
             f'- Perturbation sequence: {self.perturbation_sequence}\n'
             f'- Perturbing genes: {genes_to_perturb}\n'
-            f'- Perturbation tokens: {perturbation_tokens}\n'
             f'- Perturbation mode: {perturbation_mode}\n'
         )
         self.transformer = PerturberMasking(
@@ -148,7 +184,7 @@ class PerturberTrainer(CytoMeisterTrainer):
             context_mode=kwargs['context_mode'],
             condition_dict=kwargs['condition_dict'],
             gene_to_rowid=gene_to_rowid,
-            perturbation_tokens=perturbation_tokens,
+            tgt_pert_tokens=tgt_pert_tokens,
         )
 
         self.generate = generate
@@ -217,12 +253,12 @@ class PerturberTrainer(CytoMeisterTrainer):
     ):
         if perturbation:
             if self.perturbation_mode in ['mask', 'pad']:
-                if self.gene_to_rowid is not None:
+                if self.gene_to_tgtid is not None:
                     if self.perturbation_mode == 'mask':
-                        perturbation_token = self.gene_to_rowid['<mask>']
+                        perturbation_token = self.gene_to_tgtid['<mask>']
                     elif self.perturbation_mode == 'pad':
-                        perturbation_token = self.gene_to_rowid['<pad>']
-                    self.perturbation_token = torch.tensor(
+                        perturbation_token = self.gene_to_tgtid['<pad>']
+                    replace_token = torch.tensor(
                         perturbation_token, dtype=torch.long, device=self.device
                     )
                 else:
@@ -244,28 +280,29 @@ class PerturberTrainer(CytoMeisterTrainer):
                     and 'tgt' in self.perturbation_sequence
                 ):
                     perturbed_tgt = tgt_input_id_.clone()
-                    mask = torch.isin(tgt_input_id_, self.perturbation_tokens)
+                    mask = torch.isin(tgt_input_id_, self.tgt_pert_tokens)
                     if self.perturbation_mode in ['delete', 'overexpress']:
                         perturbed_tgt = self.delete_token(
-                            perturbed_tgt, self.perturbation_tokens
+                            perturbed_tgt, self.tgt_pert_tokens
                         )
                     else:
-                        perturbed_tgt[mask] = self.perturbation_token
+                        perturbed_tgt[mask] = replace_token
 
                     tgt_input_id_ = perturbed_tgt.clone()
 
                     # add another if to concatenate overexpressed genes
                     if self.perturbation_mode == 'overexpress':
-                        # concatenate perturbation_tokens to tgt_input_id_
-                        tgt_input_id_ = torch.cat(
-                            (
-                                self.perturbation_tokens.expand(
-                                    tgt_input_id_.shape[0], -1
+                        if self.tgt_pert_tokens is not None:
+                            # concatenate tgt_pert_tokens to tgt_input_id_
+                            tgt_input_id_ = torch.cat(
+                                (
+                                    self.tgt_pert_tokens.expand(
+                                        tgt_input_id_.shape[0], -1
+                                    ),
+                                    tgt_input_id_,
                                 ),
-                                tgt_input_id_,
-                            ),
-                            dim=1,
-                        )
+                                dim=1,
+                            )
 
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
 
@@ -275,9 +312,11 @@ class PerturberTrainer(CytoMeisterTrainer):
                 and 'src' in self.perturbation_sequence
             ):
                 perturbed_src = batch['src_input_ids'].clone()
+
                 if self.perturbation_mode == 'delete':
                     # Create a mask for elements not equal to the target token
-                    mask = perturbed_src != self.perturbation_tokens
+
+                    mask = perturbed_src != self.src_pert_tokens
                     # add padding mask
                     pad_mask = perturbed_src != self.pad_token_id
                     mask_ = mask & pad_mask
@@ -302,8 +341,9 @@ class PerturberTrainer(CytoMeisterTrainer):
                     )
                     perturbed_src[batch_indices, position_indices] = valid_tokens
                 else:
-                    mask = torch.isin(perturbed_src, self.perturbation_tokens)
-                    perturbed_src[mask] = self.perturbation_token
+                    mask = torch.isin(perturbed_src, self.src_pert_tokens)
+                    perturbed_src[mask] = replace_token
+
             else:
                 perturbed_src = batch['src_input_ids']
         else:
@@ -325,12 +365,6 @@ class PerturberTrainer(CytoMeisterTrainer):
         return outputs, perturbed_src, tgt_input_id_dict
 
     def test_step(self, batch, *args, **kwargs):
-        # exclude self.perturbation_tokens from downstream analysis by creating a mask
-        perturbed_mask_dict = {}
-        for i in self.pred_tps:
-            perturbed_mask_dict[i] = torch.isin(
-                batch[f'tgt_input_ids_t{i}'], self.perturbation_tokens
-            )
         if self.validation_mode == 'inference':
             true_outputs, _, true_ids_dict = self.forward(batch, perturbation=False)
             (
@@ -358,7 +392,7 @@ class PerturberTrainer(CytoMeisterTrainer):
 
             true_outputs, true_ids_dict = self.transformer.generate(
                 src_input_id=batch['src_input_ids'],
-                genes_to_perturb=self.perturbation_tokens,
+                genes_to_perturb=self.tgt_pert_tokens,
                 **decoder_kwargs,
             )
             perturbed_outputs, generated_ids_dict = self.transformer.generate(
@@ -401,7 +435,7 @@ class PerturberTrainer(CytoMeisterTrainer):
             # token_probs_change = delta_probs.sum(dim=-1)
             # delta_gene_probs, self.marker_genes = map_results_to_genes(
             #     token_probs_change,
-            #     mapping_dict=self.gene_to_rowid,
+            #     mapping_dict=self.gene_to_tgtid,
             #     token_ids=batch[f'tgt_input_ids_t{t}'],
             # )
 
@@ -412,26 +446,26 @@ class PerturberTrainer(CytoMeisterTrainer):
             )
             gene_cos_sim, self.marker_genes = map_results_to_genes(
                 gene_cos_sim,
-                mapping_dict=self.gene_to_rowid,
+                mapping_dict=self.gene_to_tgtid,
                 token_ids=batch[f'tgt_input_ids_t{t}'],
             )
             true_mean_embs = mean_nonpadding_embs(
                 embs=true_gene,  # exclude cls token
                 input_ids=batch[f'tgt_input_ids_t{t}'],
-                mapping_dict=self.gene_to_rowid,
+                mapping_dict=self.gene_to_tgtid,
                 condition_dict=self.condition_dict,
-                perturbation_tokens=self.perturbation_tokens,
+                perturbation_tokens=self.tgt_pert_tokens,
                 dim=1,
             )
             if self.perturbation_mode == 'delete':
                 # do not exclude any tokens from mean computation
                 perturbation_token_tmp = None
             else:
-                perturbation_token_tmp = self.perturbation_tokens
+                perturbation_token_tmp = self.tgt_pert_tokens
             perturbed_mean_cls = mean_nonpadding_embs(
                 embs=perturbed_gene,  # exclude cls token
                 input_ids=batch[f'tgt_input_ids_t{t}'],
-                mapping_dict=self.gene_to_rowid,
+                mapping_dict=self.gene_to_tgtid,
                 condition_dict=self.condition_dict,
                 perturbation_tokens=perturbation_token_tmp,
                 dim=1,

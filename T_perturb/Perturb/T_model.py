@@ -16,15 +16,13 @@ from T_perturb.src.utils import (
 class PerturberMasking(CytoMeister):
     def __init__(
         self,
-        perturbation_tokens,
+        tgt_pert_tokens,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.mask_scheduler = kwargs['mask_scheduler']
-        self.register_buffer(
-            'perturbation_tokens', perturbation_tokens, persistent=False
-        )
+        self.register_buffer('tgt_pert_tokens', tgt_pert_tokens, persistent=False)
 
     def generate(
         self,
@@ -302,7 +300,7 @@ class PerturberMasking(CytoMeister):
                 input_ids=tgt_input_id,
                 mapping_dict=self.gene_to_rowid,
                 condition_dict=self.condition_dict,
-                perturbation_tokens=self.perturbation_tokens,
+                perturbation_tokens=self.tgt_pert_tokens,
             )
         else:
             mean_embedding = None
