@@ -137,7 +137,10 @@ class PerturberTrainer(CytoMeisterTrainer):
                     )
                 else:
                     raise ValueError(
-                        'Please specify either genes_to_perturb or tokens_to_perturb'
+                        (
+                            'Please specify either genes_to_perturb'
+                            'or src_tokens_to_perturb'
+                        )
                     )
                 self.register_buffer(
                     'src_pert_tokens', src_pert_tokens, persistent=False
@@ -152,12 +155,17 @@ class PerturberTrainer(CytoMeisterTrainer):
                     )
                 else:
                     raise ValueError(
-                        'Please specify either genes_to_perturb or tokens_to_perturb'
+                        (
+                            'Please specify either genes_to_perturb'
+                            'or tgt_tokens_to_perturb'
+                        )
                     )
+                self.register_buffer(
+                    'tgt_pert_tokens', tgt_pert_tokens, persistent=False
+                )
             self.genes_to_perturb = genes_to_perturb
         else:
             raise ValueError('Please specify the perturbation_sequence: "src" or "tgt"')
-
         print(
             f'Start perturbation ...\n'
             f'- Validation mode: {self.validation_mode}\n'
@@ -219,32 +227,32 @@ class PerturberTrainer(CytoMeisterTrainer):
 
     def delete_token(
         self,
-        perturbed_tgt: torch.Tensor,
+        tgt_input_ids: torch.Tensor,
         token_to_perturb: torch.Tensor,
     ):
         # Create a mask for elements not equal to the target token
-        mask = perturbed_tgt != token_to_perturb
+        mask = tgt_input_ids != token_to_perturb
         # add padding mask
-        pad_mask = perturbed_tgt != self.pad_token_id
+        pad_mask = tgt_input_ids != self.pad_token_id
         mask_ = mask & pad_mask
         # Count the number of valid tokens in each sequence
         valid_counts = mask_.sum(dim=1)
         # Get indices for valid tokens
-        valid_tokens = perturbed_tgt[mask_]
+        valid_tokens = tgt_input_ids[mask_]
 
         # Initialize the result tensor filled with pad_token_id
-        perturbed_tgt = torch.full_like(perturbed_tgt, self.pad_token_id)
+        tgt_input_ids = torch.full_like(tgt_input_ids, self.pad_token_id)
 
         # Use advanced indexing to fill the valid tokens
-        # into the perturbed_tgt tensor
+        # into the tgt_input_ids tensor
         batch_indices = torch.arange(
-            perturbed_tgt.size(0), device=perturbed_tgt.device
+            tgt_input_ids.size(0), device=tgt_input_ids.device
         ).repeat_interleave(valid_counts)
         position_indices = torch.cat(
-            [torch.arange(c, device=perturbed_tgt.device) for c in valid_counts]
+            [torch.arange(c, device=tgt_input_ids.device) for c in valid_counts]
         )
-        perturbed_tgt[batch_indices, position_indices] = valid_tokens
-        return perturbed_tgt
+        tgt_input_ids[batch_indices, position_indices] = valid_tokens
+        return tgt_input_ids
 
     def forward(
         self,
@@ -267,79 +275,68 @@ class PerturberTrainer(CytoMeisterTrainer):
                         'to map the perturbation token'
                     )
 
-        tgt_input_id_dict = concat_cond_tokens(
-            time_points=self.total_tps,
-            condition_dict=self.condition_dict,
-            batch=batch,
-        )
         for i in self.pred_tps:
-            tgt_input_id_ = tgt_input_id_dict[f'tgt_input_ids_t{i}'].clone()
+            tgt_input_id_ = batch[f'tgt_input_ids_t{i}'].clone()
+            tgt_input_id_dict = {}
             if perturbation:
                 if (
                     self.perturbation_sequence is not None
                     and 'tgt' in self.perturbation_sequence
                 ):
-                    perturbed_tgt = tgt_input_id_.clone()
                     mask = torch.isin(tgt_input_id_, self.tgt_pert_tokens)
                     if self.perturbation_mode in ['delete', 'overexpress']:
-                        perturbed_tgt = self.delete_token(
-                            perturbed_tgt, self.tgt_pert_tokens
+                        tgt_input_id_ = self.delete_token(
+                            tgt_input_id_, self.tgt_pert_tokens
                         )
-                    else:
-                        perturbed_tgt[mask] = replace_token
-
-                    tgt_input_id_ = perturbed_tgt.clone()
-
-                    # add another if to concatenate overexpressed genes
-                    if self.perturbation_mode == 'overexpress':
-                        if self.tgt_pert_tokens is not None:
-                            # concatenate tgt_pert_tokens to tgt_input_id_
-                            tgt_input_id_ = torch.cat(
-                                (
-                                    self.tgt_pert_tokens.expand(
-                                        tgt_input_id_.shape[0], -1
+                        # add another if to concatenate overexpressed genes
+                        if self.perturbation_mode == 'overexpress':
+                            if self.tgt_pert_tokens is not None:
+                                # exclude padding token to keep the same sequence length
+                                tgt_input_id_ = tgt_input_id_[:, :-1]
+                                tgt_input_id_ = torch.cat(
+                                    (
+                                        self.tgt_pert_tokens.expand(
+                                            tgt_input_id_.shape[0], -1
+                                        ),
+                                        tgt_input_id_,
                                     ),
-                                    tgt_input_id_,
-                                ),
-                                dim=1,
-                            )
+                                    dim=1,
+                                )
+                    else:
+                        tgt_input_id_[mask] = replace_token
 
+            cond_ids = concat_cond_tokens(
+                batch=batch,
+                time_step=i,
+                condition_dict=self.condition_dict,
+            )
+            tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
-
         if perturbation:
             if (
                 self.perturbation_sequence is not None
                 and 'src' in self.perturbation_sequence
             ):
                 perturbed_src = batch['src_input_ids'].clone()
-
-                if self.perturbation_mode == 'delete':
-                    # Create a mask for elements not equal to the target token
-
-                    mask = perturbed_src != self.src_pert_tokens
-                    # add padding mask
-                    pad_mask = perturbed_src != self.pad_token_id
-                    mask_ = mask & pad_mask
-                    # Count the number of valid tokens in each sequence
-                    valid_counts = mask_.sum(dim=1)
-                    # Get indices for valid tokens
-                    valid_tokens = perturbed_src[mask_]
-
-                    # Initialize the result tensor filled with pad_token_id
-                    perturbed_src = torch.full_like(perturbed_src, self.pad_token_id)
-
-                    # Use advanced indexing to fill the valid tokens
-                    # into the perturbed_src tensor
-                    batch_indices = torch.arange(
-                        perturbed_src.size(0), device=perturbed_src.device
-                    ).repeat_interleave(valid_counts)
-                    position_indices = torch.cat(
-                        [
-                            torch.arange(c, device=perturbed_src.device)
-                            for c in valid_counts
-                        ]
+                if self.perturbation_mode in ['delete', 'overexpress']:
+                    perturbed_src = self.delete_token(
+                        perturbed_src, self.src_pert_tokens
                     )
-                    perturbed_src[batch_indices, position_indices] = valid_tokens
+                    if self.perturbation_mode == 'overexpress':
+                        # exclude padding token to keep the same sequence length
+                        perturbed_src = perturbed_src[:, :-1]
+                        src_pert_tokens = self.src_pert_tokens.expand(
+                            perturbed_src.shape[0], -1
+                        )
+                        # concatenate overexpressed genes after cl[s
+                        perturbed_src = torch.cat(
+                            (
+                                perturbed_src[:, 0:1],
+                                src_pert_tokens,
+                                perturbed_src[:, 1:],
+                            ),
+                            dim=1,
+                        )
                 else:
                     mask = torch.isin(perturbed_src, self.src_pert_tokens)
                     perturbed_src[mask] = replace_token
@@ -372,7 +369,6 @@ class PerturberTrainer(CytoMeisterTrainer):
                 _,
                 perturbed_ids_dict,
             ) = self.forward(batch, perturbation=True)
-
         elif self.validation_mode == 'generate':
             # print(self.transformer)
             # self.transformer = self.quantize_model(self.transformer)
@@ -438,12 +434,12 @@ class PerturberTrainer(CytoMeisterTrainer):
             #     mapping_dict=self.gene_to_tgtid,
             #     token_ids=batch[f'tgt_input_ids_t{t}'],
             # )
-
             gene_cos_sim = cosine_similarity(
                 true_gene,
                 perturbed_gene,
                 dim=-1,
             )
+
             gene_cos_sim, self.marker_genes = map_results_to_genes(
                 gene_cos_sim,
                 mapping_dict=self.gene_to_tgtid,
@@ -457,20 +453,15 @@ class PerturberTrainer(CytoMeisterTrainer):
                 perturbation_tokens=self.tgt_pert_tokens,
                 dim=1,
             )
-            if self.perturbation_mode == 'delete':
-                # do not exclude any tokens from mean computation
-                perturbation_token_tmp = None
-            else:
-                perturbation_token_tmp = self.tgt_pert_tokens
             perturbed_mean_cls = mean_nonpadding_embs(
                 embs=perturbed_gene,  # exclude cls token
                 input_ids=batch[f'tgt_input_ids_t{t}'],
                 mapping_dict=self.gene_to_tgtid,
                 condition_dict=self.condition_dict,
-                perturbation_tokens=perturbation_token_tmp,
+                perturbation_tokens=self.tgt_pert_tokens,
+                perturbation_mode=self.perturbation_mode,
                 dim=1,
             )
-
             mean_cos_sim = cosine_similarity(
                 perturbed_mean_cls,
                 true_mean_embs,

@@ -207,43 +207,28 @@ def get_idx_for_filtering(
 
 
 def concat_cond_tokens(
-    time_points: list[int],
     batch: dict,
+    time_step: int,
     condition_dict: dict[str, dict] | None = None,
 ):
-    batch_size = batch['src_input_ids'].shape[0]
-    tgt_input_id_dict = {}
-    for i in time_points:
-        tgt_input_id = batch[f'tgt_input_ids_t{i}']
-        device = tgt_input_id.device
-        if condition_dict is not None:
-            cond_ids = torch.zeros(
-                (batch_size, len(condition_dict)), dtype=torch.long, device=device
+    tgt_input_ids = batch[f'tgt_input_ids_t{time_step}']
+    device = tgt_input_ids.device
+    batch_size = tgt_input_ids.shape[0]
+    if condition_dict is not None:
+        cond_ids = torch.zeros(
+            (batch_size, len(condition_dict)), dtype=torch.long, device=device
+        )
+        for j, condition in enumerate(condition_dict.keys()):
+            condition_tokens = [
+                condition_dict[condition][id]
+                for id in batch[f'{condition}_t{time_step}']
+            ]
+            # j+1 to skip time token
+            cond_ids[:, j] = torch.tensor(
+                condition_tokens, dtype=torch.long, device=device
             )
-            for j, condition in enumerate(condition_dict.keys()):
-                if condition == 'timepoint':
-                    time_token = torch.tensor(
-                        condition_dict['timepoint'][f't_{i}'], dtype=torch.long
-                    )
-                    cond_ids[:, j] = torch.tensor(
-                        time_token, dtype=torch.long, device=device
-                    )
-                else:
-                    condition_tokens = [
-                        condition_dict[condition][id]
-                        for id in batch[f'{condition}_t{i}']
-                    ]
-                    # j+1 to skip time token
-                    cond_ids[:, j] = torch.tensor(
-                        condition_tokens, dtype=torch.long, device=device
-                    )
 
-            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = torch.cat(
-                (cond_ids, tgt_input_id), dim=1
-            )
-        else:
-            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id
-    return tgt_input_id_dict
+    return cond_ids
 
 
 def compute_rouge_score(
@@ -1254,6 +1239,7 @@ def mean_nonpadding_embs(
     condition_dict: dict,
     dim: int = 1,
     perturbation_tokens: torch.Tensor | None = None,
+    perturbation_mode: Literal['mask', 'pad', 'delete', 'overexpress'] | None = None,
 ):
     '''
     Compute the mean of the non-padding embeddings.
@@ -1270,12 +1256,20 @@ def mean_nonpadding_embs(
             cond_tokens.extend(list(condition_dict[condition].values()))
         special_tokens.extend(cond_tokens)
     special_tokens = torch.tensor(special_tokens, device=embs.device)
+    if perturbation_mode is not None:
+        if perturbation_mode in ['delete', 'overexpress']:
+            # do not mask tokens as they are deleted
+            perturbation_tokens = None
+
     if perturbation_tokens is not None:
         tokens_to_exclude = torch.cat([special_tokens, perturbation_tokens])
     else:
         tokens_to_exclude = special_tokens
 
     pad_mask = torch.isin(input_ids, tokens_to_exclude)
+    if (perturbation_mode is not None) and (perturbation_mode == 'overexpress'):
+        # mask overexpressed tokens at first position
+        pad_mask[:, 0] = True
     # our mask is the opposite of BERT mask
     pad_mask = ~pad_mask
     # create a tensor of original lengths

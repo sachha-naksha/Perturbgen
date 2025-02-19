@@ -25,11 +25,11 @@ trainer:
   iterations: 19
   pos_encoding_mode: 'time_pos_sin'
   return_attn: false
-  perturbation_mode: 'delete'
+  perturbation_mode: 'overexpress'
   # genes_to_perturb:
   #   - 'DNTT'
   tgt_tokens_to_perturb:
-    - 3981
+    - 1965
   validation_mode: 'inference'
   perturbation_sequence:
     - 'tgt'

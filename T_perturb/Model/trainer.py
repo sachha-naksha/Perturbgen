@@ -290,11 +290,16 @@ class CytoMeisterTrainer(LightningModule):
                 raise ValueError('gene_embs_list is None')
 
     def forward(self, batch, generate: bool = False):
-        tgt_input_id_dict = concat_cond_tokens(
-            time_points=self.total_tps,
-            condition_dict=self.condition_dict,
-            batch=batch,
-        )
+        tgt_input_id_dict = {}
+        for i in self.total_tps:
+            cond_ids = concat_cond_tokens(
+                batch=batch,
+                time_step=i,
+                condition_dict=self.condition_dict,
+            )
+            tgt_input_id_ = batch[f'tgt_input_ids_t{i}']
+            tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         if generate:
             outputs = None
         else:
@@ -880,11 +885,16 @@ class CountDecoderTrainer(LightningModule):
         self.condition_dict = condition_dict
 
     def forward(self, batch, generate: bool = False):
-        tgt_input_id_dict = concat_cond_tokens(
-            time_points=self.total_tps,
-            condition_dict=self.condition_dict,
-            batch=batch,
-        )
+        tgt_input_id_dict = {}
+        for i in self.total_tps:
+            cond_ids = concat_cond_tokens(
+                batch=batch,
+                time_step=i,
+                condition_dict=self.condition_dict,
+            )
+            tgt_input_id_ = batch[f'tgt_input_ids_t{i}']
+            tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
+            tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         if generate:
             outputs = None
         else:
