@@ -670,6 +670,7 @@ class CytoMeister(nn.Module):
         context_tps: List[int] | None = None,
         encoder_path: str | None = None,
         condition_dict: Dict[str, Dict] | None = None,
+        gene_to_rowid: Dict[str, int] | None = None,
     ):
         '''
         Description:
@@ -787,13 +788,8 @@ class CytoMeister(nn.Module):
         self.pad_token = pad_token
         self.context_mode = context_mode
         self.mask_scheduler = mask_scheduler
-        # self.condition_dict = condition_dict
-        # if self.condition_dict is not None:
-        #     # select max value from the condition dict.values()
-        #     max_dict = {
-        #         key: max(lst.values()) for key, lst in self.condition_dict.items()
-        #     }
-        #     cond_vocab_size = max(max_dict.values())
+        self.gene_to_rowid = gene_to_rowid
+        self.condition_dict = condition_dict
 
     def generate_mask(
         self,
@@ -915,6 +911,7 @@ class CytoMeister(nn.Module):
         dec_embedding,
         tgt_pad,
         labels=None,
+        tgt_input_id=None,
     ):
         self_attn_list = []
         cross_attn_list = []
@@ -941,13 +938,22 @@ class CytoMeister(nn.Module):
             )
         # :TODO rewrite this part logits not needed for running the other timepoints
         decoder_logits = self.decoder_fc(dec_embedding)
+        if tgt_input_id is not None:
+            mean_embedding = mean_nonpadding_embs(
+                embs=dec_embedding,
+                input_ids=tgt_input_id,
+                mapping_dict=self.gene_to_rowid,
+                condition_dict=self.condition_dict,
+            )
+        else:
+            mean_embedding = None
         outputs = {
             'dec_embedding': dec_embedding,
             'self_attn_weights': self_attn_weights,
             'cross_attn_weights': cross_attn_weights,
             'dec_logits': decoder_logits,
             'labels': labels,
-            'mean_embedding': mean_nonpadding_embs(embs=dec_embedding, pad=tgt_pad),
+            'mean_embedding': mean_embedding,
         }
         return outputs
 
@@ -1003,6 +1009,7 @@ class CytoMeister(nn.Module):
                         dec_embedding=dec_embedding,
                         tgt_pad=tgt_pad,
                         labels=None,
+                        tgt_input_id_dict=None,
                     )
                     context_embs_list.append(dec_outputs['dec_embedding'])
                     context_pad_list.append(tgt_pad)
@@ -1127,6 +1134,7 @@ class CytoMeister(nn.Module):
                 dec_embedding=dec_embedding,
                 tgt_pad=tgt_pad,
                 labels=labels,
+                tgt_input_id=tgt_input_id_dict[f'tgt_input_ids_t{tgt_time_step}'],
             )
             all_outputs[tgt_time_step] = outputs
         return all_outputs

@@ -657,6 +657,7 @@ def main() -> None:
         callbacks=[TQDMProgressBar(refresh_rate=10)],
         accelerator=accelerator,
         devices=1,  # inference only on one gpu
+        limit_test_batches=25,
     )
     # Finally, kick of the training process.
     if args.test_mode == 'masking':

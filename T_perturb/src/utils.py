@@ -311,8 +311,8 @@ def compute_rouge_score(
 
 
 def compute_cos_similarity(
-    outputs: dict,
-    time_step: int,
+    gene_embeddings: torch.tensor,
+    mean_embedding: torch.tensor,
 ):
     """
     Description:
@@ -320,30 +320,22 @@ def compute_cos_similarity(
     This function computes cosine similarity between cls and gene embeddings.
     Parameters:
     -----------
-    outputs: `dict`
-        Dictionary containing outputs from the model.
-    time_step: `int`
-        Time step to compute cosine similarity.
-    all_time_steps: `list[int]`
-        List of all time steps.
+    gene_embeddings: `torch.tensor`
+        Tensor of gene embeddings.
+    mean_embedding: `torch.tensor`
+        Tensor of mean aggregated cls embeddings.
     Returns:
     --------
     cos_similarity: `torch.tensor`
         Tensor of cosine similarity between cls and gene embeddings.
-    cls_embeddings: `torch.tensor`
-    gene_embeddings: `torch.tensor`
     """
-    # get cls position and dec_embedding (index = time_step-1)
-    dec_embedding = outputs[time_step]['dec_embedding']
-    cls_embeddings = outputs[time_step]['mean_embedding']
-    # exclude cls token from gene embeddings
-    gene_embeddings = dec_embedding[:, 1:, :]
     cos_similarity = []
+    # iterate over batch/cell dimension
     for i in range(gene_embeddings.shape[0]):
         # gene level cosine similarity
         cos_similarity_ = cosine_similarity(
-            cls_embeddings[i],
-            dec_embedding[i, :, :],
+            mean_embedding[i],
+            gene_embeddings[i, :, :],
             dim=1,
         )
         cos_similarity.append(cos_similarity_)
@@ -876,9 +868,6 @@ def return_generation_adata(
     if 'true_embeddings' in test_dict.keys():
         true_embeddings = torch.cat(test_dict['true_embeddings']).numpy()
         adata.obsm['true_embeddings'] = true_embeddings
-    print(adata.obsm['true_embeddings'].shape)
-    print(adata)
-    raise
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata
@@ -928,9 +917,9 @@ def return_perturbation_adata(
     """
     print('---Generating anndata')
     # adata.obsm
-    true_cls = torch.cat(test_dict['true_cls']).numpy()
-    perturbed_cls = torch.cat(test_dict['perturbed_cls']).numpy()
-    cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
+    # true_cls = torch.cat(test_dict['true_cls']).numpy()
+    # perturbed_cls = torch.cat(test_dict['perturbed_cls']).numpy()
+    # cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
     # delta_probs = torch.cat(test_dict['delta_probs']).numpy()
     # wasserstein_distance = np.concatenate(test_dict['wasserstein_distance'])
@@ -946,9 +935,9 @@ def return_perturbation_adata(
 
     # create dataframe to store perturbation results
     obsm_dict = {
-        'true_cls': true_cls,
-        'perturbed_cls': perturbed_cls,
-        'cls_cos_similarity': cls_cos_similarity,
+        # 'true_cls': true_cls,
+        # 'perturbed_cls': perturbed_cls,
+        # 'cls_cos_similarity': cls_cos_similarity,
         'mean_cos_similarity': mean_cos_similarity,
         # 'delta_probs': delta_probs,
     }
@@ -1258,16 +1247,64 @@ def gumbel_sample(t, temperature=1.0, dim=-1):
     return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim=dim)
 
 
-def mean_nonpadding_embs(embs, pad, dim=1):
+# def mean_nonpadding_embs(embs, pad, dim=1):
+#     '''
+#     Compute the mean of the non-padding embeddings.
+#     Modified from Geneformer:
+#     https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/perturber_utils.py # noqa
+#     Accessed: 2024-05-14
+#     '''
+#     pad_mask = pad.clone()
+
+#     # mask should be opposite of pad
+#     pad_mask[:, 0] = True
+#     # our mask is the opposite of BERT mask
+#     pad_mask = ~pad_mask
+#     # create a tensor of original lengths
+#     original_lens = pad_mask.sum(dim=1)
+
+#     # create CLS token mask
+#     if embs.dim() == 3:
+#         # fill the masked positions in embs with zeros
+#         masked_embs = embs.masked_fill(~pad_mask.unsqueeze(2), 0.0)
+#         # compute the mean across the non-padding dimensions
+#         mean_embs = masked_embs.sum(dim) / original_lens.view(-1, 1).float()
+
+#     elif embs.dim() == 2:
+#         masked_embs = embs.masked_fill(~pad_mask, 0.0)
+#         mean_embs = masked_embs.sum(dim) / original_lens.float()
+#     return mean_embs
+
+
+def mean_nonpadding_embs(
+    embs: torch.Tensor,
+    input_ids: torch.Tensor,
+    mapping_dict: dict,
+    condition_dict: dict,
+    dim: int = 1,
+    perturbation_tokens: torch.Tensor | None = None,
+):
     '''
     Compute the mean of the non-padding embeddings.
     Modified from Geneformer:
     https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/perturber_utils.py # noqa
     Accessed: 2024-05-14
     '''
-    pad_mask = pad.clone()
-    # mask should be opposite of pad
-    pad_mask[:, 0] = True
+    # create a mask to exclude special and perturbation tokens
+    special_token_names = ['<cls>', '<mask>', '<pad>', '<eos>']
+    special_tokens = [mapping_dict[token] for token in special_token_names]
+    if condition_dict is not None:
+        cond_tokens = []
+        for condition in condition_dict:
+            cond_tokens.extend(list(condition_dict[condition].values()))
+        special_tokens.extend(cond_tokens)
+    special_tokens = torch.tensor(special_tokens, device=embs.device)
+    if perturbation_tokens is not None:
+        tokens_to_exclude = torch.cat([special_tokens, perturbation_tokens])
+    else:
+        tokens_to_exclude = special_tokens
+
+    pad_mask = torch.isin(input_ids, tokens_to_exclude)
     # our mask is the opposite of BERT mask
     pad_mask = ~pad_mask
     # create a tensor of original lengths

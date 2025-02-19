@@ -127,7 +127,20 @@ class CytoMeisterTrainer(LightningModule):
         self.pred_tps = pred_tps
         self.n_total_tps = n_total_tps
         self.context_tps = context_tps
+        gene_to_rowid: Dict[Any, Any] | None = {}
+        if mapping_dict_path is not None:
+            with open(
+                mapping_dict_path,
+                'rb',
+            ) as f:
+                mapping_dict = pickle.load(f)
+                # swap key and value
+                mapping_dict = {v: k for k, v in mapping_dict.items()}
+                gene_to_rowid = mapping_dict
+        else:
+            gene_to_rowid = None
 
+        self.gene_to_rowid = gene_to_rowid
         self.transformer = CytoMeister(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -147,6 +160,7 @@ class CytoMeisterTrainer(LightningModule):
             return_attn=return_attn,
             context_mode=context_mode,
             condition_dict=condition_dict,
+            gene_to_rowid=gene_to_rowid,
         )
         self.masking_loss = nn.CrossEntropyLoss()
 
@@ -157,18 +171,7 @@ class CytoMeisterTrainer(LightningModule):
         self.warmup_epochs = warmup_epochs
         self.perplexity = Perplexity(ignore_index=-100)
         self.mse = MeanSquaredError()
-        if mapping_dict_path is not None:
-            with open(
-                mapping_dict_path,
-                'rb',
-            ) as f:
-                gene_to_rowid = pickle.load(f)
-                # swap key and value
-                self.gene_to_rowid: Dict[Any, Any] | None = {
-                    v: k for k, v in gene_to_rowid.items()
-                }
-        else:
-            self.gene_to_rowid = None
+
         with open(
             tokenid_to_rowid_path,
             'rb',
@@ -467,12 +470,13 @@ class CytoMeisterTrainer(LightningModule):
 
         for t in self.pred_tps:
             token_ids = tgt_input_id_dict[f'tgt_input_ids_t{t}']
-
+            gene_embeddings = outputs[t]['dec_embedding'][:, cond_length:, :]
+            mean_embedding = outputs[t]['mean_embedding']
             if self.return_gene_embs:
                 # take the non zero mean of the gene embeddings
                 gene_embeddings = return_gene_embeddings(
                     # marker_genes=marker_genes,
-                    gene_embeddings=outputs[t]['dec_embedding'][:, cond_length:, :],
+                    gene_embeddings=gene_embeddings,
                     mapping_dict=(
                         self.gene_to_rowid if self.gene_to_rowid is not None else None
                     ),
@@ -516,7 +520,10 @@ class CytoMeisterTrainer(LightningModule):
             )
             if self.return_embeddings:
                 # 1. compute cosine similarity
-                cos_similarity = compute_cos_similarity(outputs=outputs, time_step=t)
+                cos_similarity = compute_cos_similarity(
+                    gene_embeddings=gene_embeddings,
+                    mean_embedding=mean_embedding,
+                )
                 # 2. map cosine similarity to corresponding genes
                 marker_cos_similarity, marker_genes_dict = map_results_to_genes(
                     res=cos_similarity,
@@ -591,7 +598,7 @@ class CytoMeisterTrainer(LightningModule):
                     )
                     self.test_dict = test_dict
             true_counts = batch[f'tgt_counts_t{t}'].detach().cpu()
-            cls_embeddings = outputs[t]['mean_embedding'].detach().cpu()
+            cls_embeddings = mean_embedding.detach().cpu()
             combined_batch = batch['combined_batch'].detach().cpu()
             # remove duplicates
             true_counts = true_counts[dupl_outside_batch]
@@ -628,6 +635,7 @@ class CytoMeisterTrainer(LightningModule):
                 output_dir=self.output_dir,
                 file_name=f'{self.date}_self_attn_weights',
             )
+            # TODO: exclude condition tokens
             aggregate_attn_weights(
                 attn_weights=cross_attn_weights,
                 tgt_gene_names=tgt_gene_order,

@@ -7,6 +7,7 @@ from torch import nn
 from T_perturb.Modules.T_model import CytoMeister
 from T_perturb.src.utils import (
     gumbel_sample,
+    mean_nonpadding_embs,
     noise_schedule,
     top_k,
 )
@@ -15,11 +16,15 @@ from T_perturb.src.utils import (
 class PerturberMasking(CytoMeister):
     def __init__(
         self,
+        perturbation_tokens,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.mask_scheduler = kwargs['mask_scheduler']
+        self.register_buffer(
+            'perturbation_tokens', perturbation_tokens, persistent=False
+        )
 
     def generate(
         self,
@@ -229,7 +234,6 @@ class PerturberMasking(CytoMeister):
             if genes_to_perturb is not None:
                 # exclude genes_to_perturb from the option to be selected
                 logits[:, :, genes_to_perturb] = max_neg_value
-                # print the shape and then check genes_to_perturb
             # exclude cls token
             tmp_ids_ = tmp_ids[:, prompt_length:].clone()
             scores_ = scores[:, prompt_length:].clone()
@@ -257,3 +261,58 @@ class PerturberMasking(CytoMeister):
             scores[:, prompt_length:] = scores_
             tmp_ids[:, prompt_length:] = tmp_ids_
         return outputs[tgt_time_step], tmp_ids
+
+    def call_decoder(
+        self,
+        enc_output,
+        src_attention_mask,
+        dec_embedding,
+        tgt_pad,
+        labels=None,
+        tgt_input_id=None,
+    ):
+        self_attn_list = []
+        cross_attn_list = []
+        for dec_layer in self.decoder_block:
+            # see if concatenation of cls embedding
+            dec_embedding, self_attn_weights, cross_attn_weights = dec_layer(
+                x=dec_embedding,
+                src_mask=src_attention_mask,
+                tgt_mask=tgt_pad,
+                enc_output=enc_output,
+            )
+            if self_attn_weights is not None:
+                self_attn_list.append(self_attn_weights)
+            if cross_attn_weights is not None:
+                cross_attn_list.append(cross_attn_weights)
+        # also convert to float 16 for memory efficiency
+        if len(self_attn_list) > 0:
+            self_attn_weights = (
+                torch.stack(self_attn_list).mean(dim=0).to(torch.float16)
+            )
+        if len(cross_attn_list) > 0:
+            cross_attn_weights = (
+                torch.stack(cross_attn_list).mean(dim=0).to(torch.float16)
+            )
+        # :TODO rewrite this part logits not needed for running the other timepoints
+        decoder_logits = self.decoder_fc(dec_embedding)
+        if tgt_input_id is not None:
+            mean_embedding = mean_nonpadding_embs(
+                embs=dec_embedding,
+                input_ids=tgt_input_id,
+                mapping_dict=self.gene_to_rowid,
+                condition_dict=self.condition_dict,
+                perturbation_tokens=self.perturbation_tokens,
+            )
+        else:
+            mean_embedding = None
+
+        outputs = {
+            'dec_embedding': dec_embedding,
+            'self_attn_weights': self_attn_weights,
+            'cross_attn_weights': cross_attn_weights,
+            'dec_logits': decoder_logits,
+            'labels': labels,
+            'mean_embedding': mean_embedding,
+        }
+        return outputs

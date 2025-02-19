@@ -1,5 +1,4 @@
 import pickle
-import random
 from typing import (
     Any,
     List,
@@ -7,8 +6,6 @@ from typing import (
 )
 
 import evaluate
-import numpy as np
-import pandas as pd
 import torch
 
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
@@ -16,11 +13,11 @@ from torch.nn.functional import cosine_similarity
 
 from T_perturb.Model.trainer import CytoMeisterTrainer
 from T_perturb.Perturb.T_model import PerturberMasking
-from T_perturb.src.optimal_transport import wasserstein
 from T_perturb.src.utils import (
     compute_rouge_score,
+    concat_cond_tokens,
     map_results_to_genes,
-    return_gene_embeddings,
+    mean_nonpadding_embs,
     return_perturbation_adata,
 )
 
@@ -34,16 +31,104 @@ class PerturberTrainer(CytoMeisterTrainer):
         iterations: int = 18,
         mapping_dict_path: str | None = None,
         genes_to_perturb: List[str] | None = None,
+        tokens_to_perturb: List[int] | None = None,
         validation_mode: Literal['inference', 'generate'] | None = None,
         perturbation_mode: Literal['mask', 'pad', 'delete', 'overexpress']
         | None = None,
         perturbation_sequence: Literal['src', 'tgt'] | None = None,
-        gene_module_list: List[str] | None = None,
-        num_of_background_genes: int | None = None,
+        # gene_module_list: List[str] | None = None,
+        # num_of_background_genes: int | None = None,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
+
+        self.validation_mode = validation_mode
+        if validation_mode is not None:
+            if perturbation_sequence is None:
+                raise ValueError(
+                    'Please specify the perturbation_sequence: "src" or "tgt"'
+                )
+            if perturbation_mode is None:
+                raise ValueError('Please specify the perturbation_token')
+
+            self.perturbation_sequence = perturbation_sequence
+            self.perturbation_mode = perturbation_mode
+
+            # if gene_module_list is not None:
+            #     self.gene_module_list: List[str] | None = gene_module_list
+            #     if num_of_background_genes is None:
+            #         raise ValueError('Please specify the number of background genes')
+            #     # exclude special tokens from self.gene_to_rowid
+            #     gene_tokens_filtered = {
+            #         gene: token
+            #         for gene, token in self.gene_to_rowid.items()
+            #         if gene not in self.special_tokens
+            #     }
+            #     # exclude perturbation tokens from gene_tokens_filtered
+            #     gene_tokens_filtered = {
+            #         gene: token
+            #         for gene, token in gene_tokens_filtered.items()
+            #         if token not in self.perturbation_tokens
+            #     }
+            #     self.gene_module_dict = {
+            #         gene: gene_tokens_filtered[gene] for gene in gene_module_list
+            #     }
+
+            #     # remove gene_module_tokens from selection of background genes
+            #     background_gene_dict = {
+            #         gene: token
+            #         for gene, token in gene_tokens_filtered.items()
+            #         if gene not in gene_module_list
+            #     }
+            #     # filter out all values which are >100 in background_gene_dict
+            #     background_gene_dict = {
+            #         gene: token
+            #         for gene, token in background_gene_dict.items()
+            #         if token < 100
+            #     }
+            #     random_entries = random.sample(
+            #         list(background_gene_dict.items()), num_of_background_genes
+            #     )
+            #     self.background_gene_dict = dict(random_entries)
+            # else:
+            #     self.gene_module_list = None
+
+        if mapping_dict_path is not None:
+            with open(
+                mapping_dict_path,
+                'rb',
+            ) as f:
+                tokenid_to_gene = pickle.load(f)
+            gene_to_rowid = {v: k for k, v in tokenid_to_gene.items()}
+            self.gene_to_rowid = gene_to_rowid
+            # find corresponding special for dictionary keys '<>'
+            special_tokens = [
+                k for k, v in tokenid_to_gene.items() if v.startswith('<')
+            ]
+            self.special_tokens = special_tokens
+        if genes_to_perturb is not None:
+            self.genes_to_perturb: List[str] | None = genes_to_perturb
+            perturbation_tokens = [gene_to_rowid[gene] for gene in genes_to_perturb]
+            perturbation_tokens = torch.tensor(perturbation_tokens, dtype=torch.long)
+        elif tokens_to_perturb is not None:
+            self.genes_to_perturb = None
+            perturbation_tokens = torch.tensor(tokens_to_perturb, dtype=torch.long)
+        else:
+            raise ValueError(
+                'Please specify either genes_to_perturb or tokens_to_perturb'
+            )
+        self.register_buffer(
+            'perturbation_tokens', perturbation_tokens, persistent=False
+        )
+        print(
+            f'Start perturbation ...\n'
+            f'- Validation mode: {self.validation_mode}\n'
+            f'- Perturbation sequence: {self.perturbation_sequence}\n'
+            f'- Perturbing genes: {genes_to_perturb}\n'
+            f'- Perturbation tokens: {perturbation_tokens}\n'
+            f'- Perturbation mode: {perturbation_mode}\n'
+        )
         self.transformer = PerturberMasking(
             tgt_vocab_size=kwargs['tgt_vocab_size'],
             d_model=kwargs['d_model'],
@@ -56,93 +141,15 @@ class PerturberTrainer(CytoMeisterTrainer):
             context_tps=kwargs['context_tps'] if 'context_tps' in kwargs else None,
             n_total_tps=kwargs['n_total_tps'],
             encoder=kwargs['encoder'],
+            encoder_path=kwargs['encoder_path'],
             mask_scheduler=kwargs['mask_scheduler'],
             pos_encoding_mode=kwargs['pos_encoding_mode'],
             return_attn=kwargs['return_attn'],
             context_mode=kwargs['context_mode'],
+            condition_dict=kwargs['condition_dict'],
+            gene_to_rowid=gene_to_rowid,
+            perturbation_tokens=perturbation_tokens,
         )
-        self.validation_mode = validation_mode
-        if validation_mode is not None:
-            if perturbation_sequence is None:
-                raise ValueError(
-                    'Please specify the perturbation_sequence: "src" or "tgt"'
-                )
-            if perturbation_mode is None:
-                raise ValueError('Please specify the perturbation_token')
-            if genes_to_perturb is None:
-                raise ValueError('Please specify the genes_to_perturb')
-            self.perturbation_sequence = perturbation_sequence
-            self.genes_to_perturb = genes_to_perturb
-            if mapping_dict_path is not None:
-                with open(
-                    mapping_dict_path,
-                    'rb',
-                ) as f:
-                    tokenid_to_gene = pickle.load(f)
-                gene_to_token_id = {v: k for k, v in tokenid_to_gene.items()}
-                self.gene_to_tokenid = gene_to_token_id
-                # find corresponding special for dictionary keys '<>'
-                special_tokens = [
-                    k for k, v in tokenid_to_gene.items() if v.startswith('<')
-                ]
-                self.special_tokens = special_tokens
-                tokens_to_perturb = [
-                    gene_to_token_id[gene] for gene in self.genes_to_perturb
-                ]
-                self.tokens_to_perturb = torch.tensor(
-                    tokens_to_perturb, dtype=torch.long, device=self.device
-                )
-            else:
-                self.tokens_to_perturb = torch.tensor(
-                    genes_to_perturb, dtype=torch.long, device=self.device
-                )
-            self.perturbation_mode = perturbation_mode
-
-            print(
-                f'Start perturbation ...\n'
-                f'- Validation mode: {self.validation_mode}\n'
-                f'- Perturbation sequence: {self.perturbation_sequence}\n'
-                f'- Perturbing genes: {genes_to_perturb}\n'
-                f'- Perturbation mode: {perturbation_mode}\n'
-            )
-            if gene_module_list is not None:
-                self.gene_module_list: List[str] | None = gene_module_list
-                if num_of_background_genes is None:
-                    raise ValueError('Please specify the number of background genes')
-                # exclude special tokens from self.gene_to_tokenid
-                gene_tokens_filtered = {
-                    gene: token
-                    for gene, token in self.gene_to_tokenid.items()
-                    if gene not in self.special_tokens
-                }
-                # exclude perturbation tokens from gene_tokens_filtered
-                gene_tokens_filtered = {
-                    gene: token
-                    for gene, token in gene_tokens_filtered.items()
-                    if token not in self.tokens_to_perturb
-                }
-                self.gene_module_dict = {
-                    gene: gene_tokens_filtered[gene] for gene in gene_module_list
-                }
-
-                # remove gene_module_tokens from selection of background genes
-                background_gene_dict = {
-                    gene: token
-                    for gene, token in gene_tokens_filtered.items()
-                    if gene not in gene_module_list
-                }
-                # filter out all values which are >100 in background_gene_dict
-                background_gene_dict = {
-                    gene: token
-                    for gene, token in background_gene_dict.items()
-                    if token < 100
-                }
-                random_entries = random.sample(
-                    list(background_gene_dict.items()), num_of_background_genes
-                )
-                self.background_gene_dict = dict(random_entries)
-            else:
-                self.gene_module_list = None
 
         self.generate = generate
         self.sequence_length = sequence_length
@@ -150,7 +157,7 @@ class PerturberTrainer(CytoMeisterTrainer):
         self.iterations = iterations
 
         for key in [
-            'cls_cosine_similarity',
+            # 'cls_cosine_similarity',
             'mean_cosine_similarity',
             'gene_cosine_similarity',
             'delta_probs',
@@ -209,38 +216,50 @@ class PerturberTrainer(CytoMeisterTrainer):
         perturbation: bool = False,
     ):
         if perturbation:
-            self.tokens_to_perturb = self.tokens_to_perturb.to(self.device)
             if self.perturbation_mode in ['mask', 'pad']:
-                if self.perturbation_mode == 'mask':
-                    perturbation_token = self.gene_to_tokenid['<mask>']
-                elif self.perturbation_mode == 'pad':
-                    perturbation_token = self.gene_to_tokenid['<pad>']
-                self.perturbation_token = torch.tensor(
-                    perturbation_token, dtype=torch.long, device=self.device
-                )
-        tgt_input_id_dict = {}
+                if self.gene_to_rowid is not None:
+                    if self.perturbation_mode == 'mask':
+                        perturbation_token = self.gene_to_rowid['<mask>']
+                    elif self.perturbation_mode == 'pad':
+                        perturbation_token = self.gene_to_rowid['<pad>']
+                    self.perturbation_token = torch.tensor(
+                        perturbation_token, dtype=torch.long, device=self.device
+                    )
+                else:
+                    raise ValueError(
+                        'Please specify the mapping_dict path'
+                        'to map the perturbation token'
+                    )
+
+        tgt_input_id_dict = concat_cond_tokens(
+            time_points=self.total_tps,
+            condition_dict=self.condition_dict,
+            batch=batch,
+        )
         for i in self.pred_tps:
-            tgt_input_id_ = batch[f'tgt_input_ids_t{i}'].clone()
+            tgt_input_id_ = tgt_input_id_dict[f'tgt_input_ids_t{i}'].clone()
             if perturbation:
                 if (
                     self.perturbation_sequence is not None
                     and 'tgt' in self.perturbation_sequence
                 ):
                     perturbed_tgt = tgt_input_id_.clone()
-                    mask = torch.isin(tgt_input_id_, self.tokens_to_perturb)
+                    mask = torch.isin(tgt_input_id_, self.perturbation_tokens)
                     if self.perturbation_mode in ['delete', 'overexpress']:
                         perturbed_tgt = self.delete_token(
-                            perturbed_tgt, self.tokens_to_perturb
+                            perturbed_tgt, self.perturbation_tokens
                         )
                     else:
                         perturbed_tgt[mask] = self.perturbation_token
+
                     tgt_input_id_ = perturbed_tgt.clone()
+
                     # add another if to concatenate overexpressed genes
                     if self.perturbation_mode == 'overexpress':
-                        # concatenate tokens_to_perturb to tgt_input_id_
+                        # concatenate perturbation_tokens to tgt_input_id_
                         tgt_input_id_ = torch.cat(
                             (
-                                self.tokens_to_perturb.expand(
+                                self.perturbation_tokens.expand(
                                     tgt_input_id_.shape[0], -1
                                 ),
                                 tgt_input_id_,
@@ -248,16 +267,8 @@ class PerturberTrainer(CytoMeisterTrainer):
                             dim=1,
                         )
 
-            tgt_input_id_ = torch.cat(
-                (
-                    getattr(self, f'cls_token_{str(i)}').expand(
-                        tgt_input_id_.shape[0], -1
-                    ),
-                    tgt_input_id_,
-                ),
-                dim=1,
-            )
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
+
         if perturbation:
             if (
                 self.perturbation_sequence is not None
@@ -266,7 +277,7 @@ class PerturberTrainer(CytoMeisterTrainer):
                 perturbed_src = batch['src_input_ids'].clone()
                 if self.perturbation_mode == 'delete':
                     # Create a mask for elements not equal to the target token
-                    mask = perturbed_src != self.tokens_to_perturb
+                    mask = perturbed_src != self.perturbation_tokens
                     # add padding mask
                     pad_mask = perturbed_src != self.pad_token_id
                     mask_ = mask & pad_mask
@@ -291,7 +302,7 @@ class PerturberTrainer(CytoMeisterTrainer):
                     )
                     perturbed_src[batch_indices, position_indices] = valid_tokens
                 else:
-                    mask = torch.isin(perturbed_src, self.tokens_to_perturb)
+                    mask = torch.isin(perturbed_src, self.perturbation_tokens)
                     perturbed_src[mask] = self.perturbation_token
             else:
                 perturbed_src = batch['src_input_ids']
@@ -313,57 +324,20 @@ class PerturberTrainer(CytoMeisterTrainer):
 
         return outputs, perturbed_src, tgt_input_id_dict
 
-    def mean_perturbation_embs(
-        self,
-        embs: torch.Tensor,
-        input_ids: torch.Tensor,
-        mapping_dict: dict,
-        perturbation_tokens: torch.Tensor,
-        dim: int = 1,
-    ):
-        '''
-        Compute the mean of the non-padding embeddings.
-        Modified from Geneformer:
-        https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/perturber_utils.py # noqa
-        Accessed: 2024-05-14
-        '''
-
-        # create a mask to exclude special and perturbation tokens
-        special_token_names = ['<cls>', '<mask>', '<pad>', '<eos>']
-        special_tokens = [mapping_dict[token] for token in special_token_names]
-        tokens_to_exclude = torch.cat(
-            (
-                torch.tensor(special_tokens, device=perturbation_tokens.device),
-                perturbation_tokens,
-            )
-        )
-        pad_mask = torch.isin(input_ids, tokens_to_exclude)
-        # create a tensor of original lengths
-        original_lens = pad_mask.sum(dim=1)
-
-        # create CLS token mask
-        if embs.dim() == 3:
-            # fill the masked positions in embs with zeros
-            masked_embs = embs.masked_fill(pad_mask.unsqueeze(2), 0.0)
-            # compute the mean across the non-padding dimensions
-            mean_embs = masked_embs.sum(dim) / original_lens.view(-1, 1).float()
-
-        elif embs.dim() == 2:
-            masked_embs = embs.masked_fill(pad_mask, 0.0)
-            mean_embs = masked_embs.sum(dim) / original_lens.float()
-        return mean_embs
-
     def test_step(self, batch, *args, **kwargs):
-        # exclude self.tokens_to_perturb from downstream analysis by creating a mask
-        self.tokens_to_perturb = self.tokens_to_perturb.to(self.device)
+        # exclude self.perturbation_tokens from downstream analysis by creating a mask
         perturbed_mask_dict = {}
         for i in self.pred_tps:
             perturbed_mask_dict[i] = torch.isin(
-                batch[f'tgt_input_ids_t{i}'], self.tokens_to_perturb
+                batch[f'tgt_input_ids_t{i}'], self.perturbation_tokens
             )
         if self.validation_mode == 'inference':
-            true_outputs, _, _ = self.forward(batch, perturbation=False)
-            perturbed_outputs, _, _ = self.forward(batch, perturbation=True)
+            true_outputs, _, true_ids_dict = self.forward(batch, perturbation=False)
+            (
+                perturbed_outputs,
+                _,
+                perturbed_ids_dict,
+            ) = self.forward(batch, perturbation=True)
 
         elif self.validation_mode == 'generate':
             # print(self.transformer)
@@ -371,10 +345,10 @@ class PerturberTrainer(CytoMeisterTrainer):
             (
                 _,
                 pert_src_input_ids,
-                tgt_input_id_dict,
+                perturbed_ids_dict,
             ) = self.forward(batch, perturbation=True)
             decoder_kwargs = {
-                'tgt_input_id_dict': tgt_input_id_dict,
+                'tgt_input_id_dict': perturbed_ids_dict,
                 'mask_scheduler': self.mask_scheduler,
                 'can_remask_prev_masked': False,
                 'topk_filter_thres': 0.9,
@@ -384,10 +358,10 @@ class PerturberTrainer(CytoMeisterTrainer):
 
             true_outputs, true_ids_dict = self.transformer.generate(
                 src_input_id=batch['src_input_ids'],
-                genes_to_perturb=self.tokens_to_perturb,
+                genes_to_perturb=self.perturbation_tokens,
                 **decoder_kwargs,
             )
-            perturbed_outputs, perturbed_ids_dict = self.transformer.generate(
+            perturbed_outputs, generated_ids_dict = self.transformer.generate(
                 src_input_id=pert_src_input_ids,
                 **decoder_kwargs,
             )
@@ -414,14 +388,10 @@ class PerturberTrainer(CytoMeisterTrainer):
         for t in self.pred_tps:
             # create a mask for special tokens to exlude
             # them from the cosine similarity & logits and probs
-
-            true_cls = true_outputs[t]['dec_embedding'][:, 0, :]
-            true_gene = true_outputs[t]['dec_embedding'][:, 1:, :]
-
+            cond_len = len(self.condition_dict)
+            true_gene = true_outputs[t]['dec_embedding'][:, cond_len:, :]
             # true_logits = true_outputs[t]['dec_logits'][:, 1:, :]
-
-            perturbed_cls = perturbed_outputs[t]['dec_embedding'][:, 0, :]
-            perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, 1:, :]
+            perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, cond_len:, :]
 
             # perturbed_logits = perturbed_outputs[t]['dec_logits'][:, 1:, :]
 
@@ -431,7 +401,7 @@ class PerturberTrainer(CytoMeisterTrainer):
             # token_probs_change = delta_probs.sum(dim=-1)
             # delta_gene_probs, self.marker_genes = map_results_to_genes(
             #     token_probs_change,
-            #     mapping_dict=self.gene_to_tokenid,
+            #     mapping_dict=self.gene_to_rowid,
             #     token_ids=batch[f'tgt_input_ids_t{t}'],
             # )
 
@@ -442,28 +412,31 @@ class PerturberTrainer(CytoMeisterTrainer):
             )
             gene_cos_sim, self.marker_genes = map_results_to_genes(
                 gene_cos_sim,
-                mapping_dict=self.gene_to_tokenid,
+                mapping_dict=self.gene_to_rowid,
                 token_ids=batch[f'tgt_input_ids_t{t}'],
             )
+            true_mean_embs = mean_nonpadding_embs(
+                embs=true_gene,  # exclude cls token
+                input_ids=batch[f'tgt_input_ids_t{t}'],
+                mapping_dict=self.gene_to_rowid,
+                condition_dict=self.condition_dict,
+                perturbation_tokens=self.perturbation_tokens,
+                dim=1,
+            )
+            if self.perturbation_mode == 'delete':
+                # do not exclude any tokens from mean computation
+                perturbation_token_tmp = None
+            else:
+                perturbation_token_tmp = self.perturbation_tokens
+            perturbed_mean_cls = mean_nonpadding_embs(
+                embs=perturbed_gene,  # exclude cls token
+                input_ids=batch[f'tgt_input_ids_t{t}'],
+                mapping_dict=self.gene_to_rowid,
+                condition_dict=self.condition_dict,
+                perturbation_tokens=perturbation_token_tmp,
+                dim=1,
+            )
 
-            cls_cos_sim = cosine_similarity(
-                perturbed_cls,
-                true_cls,
-            )
-            true_mean_embs = self.mean_perturbation_embs(
-                true_gene,  # exclude cls token
-                batch[f'tgt_input_ids_t{t}'],
-                self.gene_to_tokenid,
-                self.tokens_to_perturb,
-                dim=1,
-            )
-            perturbed_mean_cls = self.mean_perturbation_embs(
-                perturbed_gene,  # exclude cls token
-                batch[f'tgt_input_ids_t{t}'],
-                self.gene_to_tokenid,
-                self.tokens_to_perturb,
-                dim=1,
-            )
             mean_cos_sim = cosine_similarity(
                 perturbed_mean_cls,
                 true_mean_embs,
@@ -479,57 +452,57 @@ class PerturberTrainer(CytoMeisterTrainer):
             #         power=1
             #     ))
 
-            cls_cos_sim = cls_cos_sim.detach().cpu().to(torch.float16)
+            # cls_cos_sim = cls_cos_sim.detach().cpu().to(torch.float16)
             mean_cos_sim = mean_cos_sim.detach().cpu().to(torch.float16)
             gene_cos_sim = gene_cos_sim.detach().cpu().to(torch.float16)
-            true_cls = true_cls.detach().cpu().to(torch.float16)
-            perturbed_cls = perturbed_cls.detach().cpu().to(torch.float16)
+            # true_cls = true_cls.detach().cpu().to(torch.float16)
+            # perturbed_cls = perturbed_cls.detach().cpu().to(torch.float16)
 
             # token_probs_change = token_probs_change.detach().cpu().to(torch.float16)
             # delta_probs = delta_probs.detach().cpu().to(torch.float16)
             # delta_gene_probs = delta_gene_probs.detach().cpu().to(torch.float16)
-            self.test_dict['cls_cosine_similarity'].append(cls_cos_sim)
+            # self.test_dict['cls_cosine_similarity'].append(cls_cos_sim)
             self.test_dict['mean_cosine_similarity'].append(mean_cos_sim)
             self.test_dict['gene_cosine_similarity'].append(gene_cos_sim)
-            self.test_dict['true_cls'].append(true_cls)
-            self.test_dict['perturbed_cls'].append(perturbed_cls)
+            # self.test_dict['true_cls'].append(true_cls)
+            # self.test_dict['perturbed_cls'].append(perturbed_cls)
 
-            if self.gene_module_list is not None:
-                true_gm_embs = return_gene_embeddings(
-                    true_gene,
-                    self.gene_module_dict,
-                    batch[f'tgt_input_ids_t{t}'],
-                )
-                perturbed_gm_embs = return_gene_embeddings(
-                    perturbed_gene,
-                    self.gene_module_dict,
-                    batch[f'tgt_input_ids_t{t}'],
-                )
-                true_background_embs = return_gene_embeddings(
-                    true_gene,
-                    self.background_gene_dict,
-                    batch[f'tgt_input_ids_t{t}'],
-                )
-                perturbed_background_embs = return_gene_embeddings(
-                    perturbed_gene,
-                    self.background_gene_dict,
-                    batch[f'tgt_input_ids_t{t}'],
-                )
-                # convert float32 to calculate wasserstein distance
-                true_gm_embs = true_gm_embs.detach().cpu().to(torch.float32)
-                perturbed_gm_embs = perturbed_gm_embs.detach().cpu().to(torch.float32)
-                true_background_embs = (
-                    true_background_embs.detach().cpu().to(torch.float32)
-                )
-                perturbed_background_embs = (
-                    perturbed_background_embs.detach().cpu().to(torch.float32)
-                )
-                self.test_dict['true_gm_embs'].append(true_gm_embs)
-                self.test_dict['perturbed_gm_embs'].append(perturbed_gm_embs)
-                self.test_dict['true_background_embs'].append(true_background_embs)
-                self.test_dict['perturbed_background_embs'].append(
-                    perturbed_background_embs
-                )
+            # if self.gene_module_list is not None:
+            #     true_gm_embs = return_gene_embeddings(
+            #         true_gene,
+            #         self.gene_module_dict,
+            #         batch[f'tgt_input_ids_t{t}'],
+            #     )
+            #     perturbed_gm_embs = return_gene_embeddings(
+            #         perturbed_gene,
+            #         self.gene_module_dict,
+            #         batch[f'tgt_input_ids_t{t}'],
+            #     )
+            #     true_background_embs = return_gene_embeddings(
+            #         true_gene,
+            #         self.background_gene_dict,
+            #         batch[f'tgt_input_ids_t{t}'],
+            #     )
+            #     perturbed_background_embs = return_gene_embeddings(
+            #         perturbed_gene,
+            #         self.background_gene_dict,
+            #         batch[f'tgt_input_ids_t{t}'],
+            #     )
+            # # convert float32 to calculate wasserstein distance
+            # true_gm_embs = true_gm_embs.detach().cpu().to(torch.float32)
+            # perturbed_gm_embs = perturbed_gm_embs.detach().cpu().to(torch.float32)
+            # true_background_embs = (
+            #     true_background_embs.detach().cpu().to(torch.float32)
+            # )
+            # perturbed_background_embs = (
+            #     perturbed_background_embs.detach().cpu().to(torch.float32)
+            # )
+            # self.test_dict['true_gm_embs'].append(true_gm_embs)
+            # self.test_dict['perturbed_gm_embs'].append(perturbed_gm_embs)
+            # self.test_dict['true_background_embs'].append(true_background_embs)
+            # self.test_dict['perturbed_background_embs'].append(
+            #     perturbed_background_embs
+            # )
             # return obs_key
             self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
             if len(self.var_list) > 0:
@@ -549,74 +522,75 @@ class PerturberTrainer(CytoMeisterTrainer):
         return non_zero_mean
 
     def on_test_epoch_end(self):
-        # compute emd of gm_embs based on condition
-        if self.gene_module_list is not None:
-            true_gm_embs = torch.cat(self.test_dict['true_gm_embs'], dim=0)
-            perturbed_gm_embs = torch.cat(self.test_dict['perturbed_gm_embs'], dim=0)
-            true_background_embs = torch.cat(
-                self.test_dict['true_background_embs'], dim=0
-            )
-            perturbed_background_embs = torch.cat(
-                self.test_dict['perturbed_background_embs'], dim=0
-            )
-            # compute the wasserstein distance per condition
-            gm_wd = {}
-            background_wd = {}
-            conditions = np.concatenate(self.test_dict['cell_type'])
-            for condition in np.unique(conditions):
-                true_gm_embs_cond = true_gm_embs[conditions == condition]
-                perturbed_gm_embs_cond = perturbed_gm_embs[conditions == condition]
-                true_background_embs_cond = true_background_embs[
-                    conditions == condition
-                ]
-                perturbed_background_embs_cond = perturbed_background_embs[
-                    conditions == condition
-                ]
-                # non-zero mean aggregation
-                true_gm_embs_cond = self.compute_non_zero_mean(true_gm_embs_cond)
-                perturbed_gm_embs_cond = self.compute_non_zero_mean(
-                    perturbed_gm_embs_cond
-                )
-                true_background_embs_cond = self.compute_non_zero_mean(
-                    true_background_embs_cond
-                )
-                perturbed_background_embs_cond = self.compute_non_zero_mean(
-                    perturbed_background_embs_cond
-                )
-                # compute the wasserstein distance
-                gm_wd[condition] = wasserstein(
-                    true_gm_embs_cond,
-                    perturbed_gm_embs_cond,
-                )
-                background_wd[condition] = wasserstein(
-                    true_background_embs_cond,
-                    perturbed_background_embs_cond,
-                )
-                # store results as dataframes and merge them
-                gm_wd_df = pd.DataFrame.from_dict(
-                    gm_wd, orient='index', columns=['gm_wd']
-                )
-                background_wd_df = pd.DataFrame.from_dict(
-                    background_wd, orient='index', columns=['background_wd']
-                )
-                wd_df = pd.concat([gm_wd_df, background_wd_df], axis=1)
-                # plot the results
-                wd_df.plot(kind='bar')
-                wd_df.to_csv(f'{self.output_dir}/wasserstein_distance.csv')
+        # # compute emd of gm_embs based on condition
+        # if self.gene_module_list is not None:
+        #     true_gm_embs = torch.cat(self.test_dict['true_gm_embs'], dim=0)
+        #     perturbed_gm_embs = torch.cat(self.test_dict['perturbed_gm_embs'], dim=0)
+        #     true_background_embs = torch.cat(
+        #         self.test_dict['true_background_embs'], dim=0
+        #     )
+        #     perturbed_background_embs = torch.cat(
+        #         self.test_dict['perturbed_background_embs'], dim=0
+        #     )
+        #     # compute the wasserstein distance per condition
+        #     gm_wd = {}
+        #     background_wd = {}
+        #     conditions = np.concatenate(self.test_dict['cell_type'])
+        #     for condition in np.unique(conditions):
+        #         true_gm_embs_cond = true_gm_embs[conditions == condition]
+        #         perturbed_gm_embs_cond = perturbed_gm_embs[conditions == condition]
+        #         true_background_embs_cond = true_background_embs[
+        #             conditions == condition
+        #         ]
+        #         perturbed_background_embs_cond = perturbed_background_embs[
+        #             conditions == condition
+        #         ]
+        #         # non-zero mean aggregation
+        #         true_gm_embs_cond = self.compute_non_zero_mean(true_gm_embs_cond)
+        #         perturbed_gm_embs_cond = self.compute_non_zero_mean(
+        #             perturbed_gm_embs_cond
+        #         )
+        #         true_background_embs_cond = self.compute_non_zero_mean(
+        #             true_background_embs_cond
+        #         )
+        #         perturbed_background_embs_cond = self.compute_non_zero_mean(
+        #             perturbed_background_embs_cond
+        #         )
+        #         # compute the wasserstein distance
+        #         gm_wd[condition] = wasserstein(
+        #             true_gm_embs_cond,
+        #             perturbed_gm_embs_cond,
+        #         )
+        #         background_wd[condition] = wasserstein(
+        #             true_background_embs_cond,
+        #             perturbed_background_embs_cond,
+        #         )
+        #         # store results as dataframes and merge them
+        #         gm_wd_df = pd.DataFrame.from_dict(
+        #             gm_wd, orient='index', columns=['gm_wd']
+        #         )
+        #         background_wd_df = pd.DataFrame.from_dict(
+        #             background_wd, orient='index', columns=['background_wd']
+        #         )
+        #         wd_df = pd.concat([gm_wd_df, background_wd_df], axis=1)
+        #         # plot the results
+        #         wd_df.plot(kind='bar')
+        #         wd_df.to_csv(f'{self.output_dir}/wasserstein_distance.csv')
 
-                del (
-                    true_gm_embs_cond,
-                    perturbed_gm_embs_cond,
-                    true_background_embs_cond,
-                    perturbed_background_embs_cond,
-                )
+        #         del (
+        #             true_gm_embs_cond,
+        #             perturbed_gm_embs_cond,
+        #             true_background_embs_cond,
+        #             perturbed_background_embs_cond,
+        #         )
 
         obs_key = self.var_list if len(self.var_list) > 0 else []
         obs_key.extend(['cell_idx'])
-        if len(self.genes_to_perturb) > 1:
-            genes_to_perturb = '_'.join(self.genes_to_perturb)
-        else:
-            genes_to_perturb = self.genes_to_perturb[0]
+        if self.genes_to_perturb is not None:
+            if len(self.genes_to_perturb) > 1:
+                genes_to_perturb = '_'.join(self.genes_to_perturb)
+            else:
+                genes_to_perturb = self.genes_to_perturb[0]
         if len(self.perturbation_sequence) > 1:
             perturbation_sequence = '_'.join(self.perturbation_sequence)
         else:
