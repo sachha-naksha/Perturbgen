@@ -127,7 +127,6 @@ class PerturberTrainer(CytoMeisterTrainer):
         if perturbation_sequence is not None:
             if 'src' in perturbation_sequence:
                 tgt_pert_tokens = None
-                self.tgt_pert_tokens = tgt_pert_tokens
                 if genes_to_perturb is not None:
                     if gene_to_srcid is not None:
                         src_pert_tokens = [
@@ -155,7 +154,7 @@ class PerturberTrainer(CytoMeisterTrainer):
                 self.register_buffer(
                     'src_pert_tokens', src_pert_tokens, persistent=False
                 )
-            elif 'tgt' in perturbation_sequence:
+            if 'tgt' in perturbation_sequence:
                 if genes_to_perturb is not None:
                     tgt_pert_tokens = [gene_to_rowid[gene] for gene in genes_to_perturb]
                     tgt_pert_tokens = torch.tensor(tgt_pert_tokens, dtype=torch.long)
@@ -170,9 +169,7 @@ class PerturberTrainer(CytoMeisterTrainer):
                             'or tgt_tokens_to_perturb'
                         )
                     )
-                self.register_buffer(
-                    'tgt_pert_tokens', tgt_pert_tokens, persistent=False
-                )
+            self.register_buffer('tgt_pert_tokens', tgt_pert_tokens, persistent=False)
             self.genes_to_perturb = genes_to_perturb
         else:
             raise ValueError('Please specify the perturbation_sequence: "src" or "tgt"')
