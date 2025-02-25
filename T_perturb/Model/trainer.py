@@ -128,7 +128,18 @@ class CytoMeisterTrainer(LightningModule):
         self.pred_tps = pred_tps
         self.n_total_tps = n_total_tps
         self.context_tps = context_tps
-
+        if mapping_dict_path is not None:
+            with open(
+                mapping_dict_path,
+                'rb',
+            ) as f:
+                gene_to_rowid = pickle.load(f)
+                # swap key and value
+                self.gene_to_rowid: Dict[Any, Any] | None = {
+                    v: k for k, v in gene_to_rowid.items()
+                }
+        else:
+            self.gene_to_rowid = None
         self.transformer = CytoMeister(
             tgt_vocab_size=tgt_vocab_size,
             d_model=d_model,
@@ -148,6 +159,7 @@ class CytoMeisterTrainer(LightningModule):
             return_attn=return_attn,
             context_mode=context_mode,
             condition_dict=condition_dict,
+            gene_to_rowid=self.gene_to_rowid,
         )
         self.masking_loss = nn.CrossEntropyLoss()
 
@@ -158,18 +170,7 @@ class CytoMeisterTrainer(LightningModule):
         self.warmup_epochs = warmup_epochs
         self.perplexity = Perplexity(ignore_index=-100)
         self.mse = MeanSquaredError()
-        if mapping_dict_path is not None:
-            with open(
-                mapping_dict_path,
-                'rb',
-            ) as f:
-                gene_to_rowid = pickle.load(f)
-                # swap key and value
-                self.gene_to_rowid: Dict[Any, Any] | None = {
-                    v: k for k, v in gene_to_rowid.items()
-                }
-        else:
-            self.gene_to_rowid = None
+
         with open(
             tokenid_to_rowid_path,
             'rb',
@@ -288,13 +289,14 @@ class CytoMeisterTrainer(LightningModule):
     def forward(self, batch, generate: bool = False):
         tgt_input_id_dict = {}
         for i in self.total_tps:
-            cond_ids = concat_cond_tokens(
-                batch=batch,
-                time_step=i,
-                condition_dict=self.condition_dict,
-            )
             tgt_input_id_ = batch[f'tgt_input_ids_t{i}'].clone()
-            tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
+            if self.condition_dict is not None:
+                cond_ids = concat_cond_tokens(
+                    batch=batch,
+                    time_step=i,
+                    condition_dict=self.condition_dict,
+                )
+                tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
 
         if generate:
@@ -877,13 +879,14 @@ class CountDecoderTrainer(LightningModule):
     def forward(self, batch, generate: bool = False):
         tgt_input_id_dict = {}
         for i in self.total_tps:
-            cond_ids = concat_cond_tokens(
-                batch=batch,
-                time_step=i,
-                condition_dict=self.condition_dict,
-            )
             tgt_input_id_ = batch[f'tgt_input_ids_t{i}'].clone()
-            tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
+            if self.condition_dict is not None:
+                cond_ids = concat_cond_tokens(
+                    batch=batch,
+                    time_step=i,
+                    condition_dict=self.condition_dict,
+                )
+                tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         if generate:
             outputs = None

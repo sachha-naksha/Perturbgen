@@ -1,4 +1,8 @@
-from typing import Dict, List
+from typing import (
+    Dict,
+    List,
+    Literal,
+)
 
 import torch
 from einops import rearrange
@@ -38,7 +42,6 @@ class PerturberMasking(CytoMeister):
         mask_scheduler: str = 'cosine',
         sequence_length: int | None = None,
         genes_to_perturb: List | None = None,
-        prompt_length: int = 1,
         **kwargs,
     ):
         '''
@@ -67,7 +70,7 @@ class PerturberMasking(CytoMeister):
             Options: ['uniform', 'pow', 'cosine', 'log', 'exp']
         genes_to_perturb: `List`
             List of genes to perturb.
-        prompt_length: `int`
+        cond_length: `int`
             Length of the prompt to be used for generation.
 
         Returns:
@@ -116,7 +119,7 @@ class PerturberMasking(CytoMeister):
                 iterations=iterations,
                 scores=scores,
                 tgt_time_step=time_step,
-                prompt_length=prompt_length,
+                cond_length=cond_length,
                 genes_to_perturb=genes_to_perturb,
             )
             generate_id_dict[f'tgt_input_ids_t{time_step}'] = generated_ids
@@ -136,8 +139,9 @@ class PerturberMasking(CytoMeister):
         starting_temperature: float = 2.0,
         iterations: int = 18,
         tgt_time_step: int = 1,
-        prompt_length: int = 1,
-        genes_to_perturb: List | None = None,
+        cond_length: int = 1,
+        generate_mode: Literal['topk', 'topk-margin'] = 'topk-margin',
+        **kwargs,
     ):
         '''
         Description:
@@ -182,8 +186,9 @@ class PerturberMasking(CytoMeister):
             tmp_ids: `torch.Tensor`
                 Generated target token inputs.
         '''
+        genes_to_perturb = kwargs.pop('genes_to_perturb', None)
         max_neg_value = -torch.finfo().max
-        scores[:, :prompt_length] = max_neg_value
+        scores[:, :cond_length] = max_neg_value
         tmp_ids = generate_id_dict[f'tgt_input_ids_t{tgt_time_step}'].clone()
         batch_size, seq_len = tmp_ids.shape
         # find total_tokens by find the numbers of 1s in the mask
@@ -227,17 +232,17 @@ class PerturberMasking(CytoMeister):
                 not_masked=False,
                 tgt_time_step=tgt_time_step,
             )
-            logits = outputs[tgt_time_step]['dec_logits'][:, prompt_length:, :]
+            logits = outputs[tgt_time_step]['dec_logits'][:, cond_length:, :]
 
             if genes_to_perturb is not None:
                 # exclude genes_to_perturb from the option to be selected
                 logits[:, :, genes_to_perturb] = max_neg_value
             # exclude cls token
-            tmp_ids_ = tmp_ids[:, prompt_length:].clone()
-            scores_ = scores[:, prompt_length:].clone()
-            ids_to_keep_ = ids_to_keep[:, prompt_length:].clone()
+            tmp_ids_ = tmp_ids[:, cond_length:].clone()
+            scores_ = scores[:, cond_length:].clone()
+            ids_to_keep_ = ids_to_keep[:, cond_length:].clone()
             # Create a mask of already predicted tokens
-            indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - prompt_length, -1)
+            indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - cond_length, -1)
             logits.scatter_(2, indices, max_neg_value)
 
             filtered_logits = top_k(logits.clone(), topk_filter_thres)
@@ -256,8 +261,8 @@ class PerturberMasking(CytoMeister):
             if not can_remask_prev_masked:
                 scores_.masked_fill_(~is_mask, max_neg_value)
             # add cls token to the ids and update scores and ids
-            scores[:, prompt_length:] = scores_
-            tmp_ids[:, prompt_length:] = tmp_ids_
+            scores[:, cond_length:] = scores_
+            tmp_ids[:, cond_length:] = tmp_ids_
         return outputs[tgt_time_step], tmp_ids
 
     def call_decoder(

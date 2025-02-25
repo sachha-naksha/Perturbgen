@@ -6,6 +6,7 @@ from typing import (
 )
 
 import evaluate
+import numpy as np
 import torch
 
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
@@ -17,6 +18,8 @@ from T_perturb.src.utils import (
     compute_rouge_score,
     concat_cond_tokens,
     map_results_to_genes,
+    mask_duplicates_across_batches,
+    mask_duplicates_within_batches,
     mean_nonpadding_embs,
     return_perturbation_adata,
 )
@@ -156,6 +159,8 @@ class PerturberTrainer(CytoMeisterTrainer):
                 self.register_buffer(
                     'src_pert_tokens', src_pert_tokens, persistent=False
                 )
+            else:
+                self.src_pert_tokens = None
             if 'tgt' in perturbation_sequence:
                 if genes_to_perturb is not None:
                     tgt_pert_tokens = [gene_to_rowid[gene] for gene in genes_to_perturb]
@@ -363,13 +368,13 @@ class PerturberTrainer(CytoMeisterTrainer):
                             self.perturbation_mode,
                             'tgt',
                         )
-
-            cond_ids = concat_cond_tokens(
-                batch=batch,
-                time_step=i,
-                condition_dict=self.condition_dict,
-            )
-            tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
+            if self.condition_dict is not None:
+                cond_ids = concat_cond_tokens(
+                    batch=batch,
+                    time_step=i,
+                    condition_dict=self.condition_dict,
+                )
+                tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
         if self.exclude_src:
             # pad src_input_ids to ignore src
@@ -510,7 +515,38 @@ class PerturberTrainer(CytoMeisterTrainer):
                 perturbed_mean_cls,
                 true_mean_embs,
             )
+            cell_idx = np.array(batch[f'tgt_cell_idx_t{t}'])
 
+            if len(self.test_dict['cell_idx']) == 0:
+                all_cell_idx = np.array([])
+            else:
+                all_cell_idx = np.concatenate(self.test_dict['cell_idx'])
+            if self.tgt_pert_tokens is not None:
+                # remove cells where perturbed gene is not present
+                tgt_mask = torch.isin(
+                    batch[f'tgt_input_ids_t{t}'], self.tgt_pert_tokens
+                )
+                tgt_mask = tgt_mask.sum(dim=1).detach().cpu().numpy()
+            if self.src_pert_tokens is not None:
+                src_mask = torch.isin(batch['src_input_ids'], self.src_pert_tokens)
+                src_mask = src_mask.sum(dim=1).detach().cpu().numpy()
+            # combine tgt and src mask
+            if self.tgt_pert_tokens is not None and self.src_pert_tokens is not None:
+                # use logical OR to combine tgt and src mask
+                remove_cells_wo_pert = tgt_mask + src_mask > 0
+            elif self.tgt_pert_tokens is not None:
+                remove_cells_wo_pert = tgt_mask > 0
+            elif self.src_pert_tokens is not None:
+                remove_cells_wo_pert = src_mask > 0
+            else:
+                remove_cells_wo_pert = np.ones_like(cell_idx, dtype=bool)
+            cell_idx = cell_idx[remove_cells_wo_pert]
+            (dupl_outside_batch, cell_idx_filter_) = mask_duplicates_across_batches(
+                all_cell_idx, cell_idx
+            )
+            (dupl_within_batch, cell_idx_filter_) = mask_duplicates_within_batches(
+                cell_idx_filter_
+            )
             # # iterate over the batch and compute the wasserstein distance
             # wd = []
             # for i in range(true_cls.shape[0]):
@@ -532,6 +568,21 @@ class PerturberTrainer(CytoMeisterTrainer):
             # delta_probs = delta_probs.detach().cpu().to(torch.float16)
             # delta_gene_probs = delta_gene_probs.detach().cpu().to(torch.float16)
             # self.test_dict['cls_cosine_similarity'].append(cls_cos_sim)
+            # remove duplicates
+            mean_cos_sim = mean_cos_sim[remove_cells_wo_pert]
+            gene_cos_sim = gene_cos_sim[remove_cells_wo_pert]
+            true_mean_embs = true_mean_embs[remove_cells_wo_pert]
+            perturbed_mean_cls = perturbed_mean_cls[remove_cells_wo_pert]
+
+            mean_cos_sim = mean_cos_sim[dupl_outside_batch]
+            gene_cos_sim = gene_cos_sim[dupl_outside_batch]
+            true_mean_embs = true_mean_embs[dupl_outside_batch]
+            perturbed_mean_cls = perturbed_mean_cls[dupl_outside_batch]
+            mean_cos_sim = mean_cos_sim[dupl_within_batch]
+            gene_cos_sim = gene_cos_sim[dupl_within_batch]
+            true_mean_embs = true_mean_embs[dupl_within_batch]
+            perturbed_mean_cls = perturbed_mean_cls[dupl_within_batch]
+
             self.test_dict['mean_cosine_similarity'].append(mean_cos_sim)
             self.test_dict['gene_cosine_similarity'].append(gene_cos_sim)
             self.test_dict['true_cls'].append(true_mean_embs)
@@ -574,10 +625,15 @@ class PerturberTrainer(CytoMeisterTrainer):
             #     perturbed_background_embs
             # )
             # return obs_key
-            self.test_dict['cell_idx'].append(batch[f'tgt_cell_idx_t{t}'])
+            self.test_dict['cell_idx'].append(cell_idx_filter_)
             if len(self.var_list) > 0:
                 for var in self.var_list:
-                    self.test_dict[var].append(batch[f'{var}_t{t}'])
+                    # remove duplicates
+                    var_values = np.array(batch[f'{var}_t{t}'])
+                    var_values = var_values[remove_cells_wo_pert]
+                    var_values = var_values[dupl_outside_batch]
+                    var_values = var_values[dupl_within_batch]
+                    self.test_dict[var].append(var_values)
 
     def compute_non_zero_mean(self, embs: torch.Tensor):
         non_zero_mask = embs != 0
@@ -661,6 +717,8 @@ class PerturberTrainer(CytoMeisterTrainer):
                 genes_to_perturb = '_'.join(self.genes_to_perturb)
             else:
                 genes_to_perturb = self.genes_to_perturb[0]
+        else:
+            genes_to_perturb = None
         if len(self.perturbation_sequence) > 1:
             perturbation_sequence = '_'.join(self.perturbation_sequence)
         else:

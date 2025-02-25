@@ -1,8 +1,8 @@
 #!/bin/bash
-#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=4' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
-#BSUB -n 16 # number of cores
-#BSUB -G teamtrynka # groupname for billing
+#BSUB -q gpu-huge # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -gpu 'mode=exclusive_process:num=4:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu
+#BSUB -n 4 # number of cores
+#BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
 #BSUB -o logs/cytoimmgen_masking_%J.out # output file
 #BSUB -e logs/cytoimmgen_masking_%J.err # error file
@@ -49,8 +49,7 @@ python3 $cwd/train.py \
 --tgt_vocab_size 1360 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
---mlm_prob 0.15 \
---n_workers 16 \
+--n_workers 4 \
 --d_ff 64 \
 --num_layers 6 \
 --condition_keys Cell_culture_batch \
@@ -58,9 +57,10 @@ python3 $cwd/train.py \
 --var_list Cell_population Cell_type Time_point Donor \
 --encoder scmaskgit \
 --context_mode True \
+--cond_list Time_point \
 --encoder_path "/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt" \
 --pos_encoding_mode time_pos_sin \
---seed 42 \
---mask_scheduler 'cosine' \
+--seed 100 \
+--mask_scheduler 'pow' \
 --d_model 768
 echo "--- Finished computing model"

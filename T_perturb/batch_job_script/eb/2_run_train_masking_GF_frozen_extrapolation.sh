@@ -51,7 +51,6 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --tgt_vocab_size 1750 \
 --cellgen_lr 0.001 \
 --cellgen_wd 0.0001 \
---mlm_prob 0.15 \
 --n_workers 4 \
 --num_layers 3 \
 --d_ff 32 \
@@ -62,7 +61,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --context_mode True \
 --encoder_path "/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt" \
 --pos_encoding_mode time_pos_sin \
---mask_scheduler 'exp' \
+--mask_scheduler 'pow' \
+--seed 100 \
 --d_model 768
 
 echo '--- Finished computing model'

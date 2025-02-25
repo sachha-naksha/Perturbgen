@@ -1271,6 +1271,7 @@ class CytoMeister(nn.Module):
         tgt_time_step: int = 1,
         cond_length: int = 0,
         generate_mode: Literal['topk', 'topk-margin'] = 'topk-margin',
+        **kwargs,
     ):
         '''
         Description:
@@ -1373,8 +1374,6 @@ class CytoMeister(nn.Module):
             # Create a mask of already predicted tokens
             indices = ids_to_keep_.unsqueeze(1).expand(-1, seq_len - cond_length, -1)
             logits.scatter_(2, indices, max_neg_value)
-            # disable padding prediction
-            logits[:, :, 0] = max_neg_value
 
             filtered_logits = top_k(logits.clone(), topk_filter_thres)
             temperature = starting_temperature * (
@@ -1493,7 +1492,7 @@ class CountDecoder(nn.Module):
             'time_pos_sin', 'comb_sin', 'sin_learnt'
         ] = 'time_pos_sin',
         layer_norm: bool = False,
-        add_cell_time: bool = True,
+        add_cell_time: bool = False,
         dropout: float = 0.0,
         pred_tps: list = [1, 2],
         n_total_tps: int = 3,
@@ -1556,9 +1555,9 @@ class CountDecoder(nn.Module):
                 else None
             )
 
-        if self.add_cell_time:
-            if use_positional_encoding:
-                d_condc = d_model
+        # if self.add_cell_time:
+        #     if use_positional_encoding:
+        #         d_condc = d_model
 
         if self.add_cell_time:
             self.count_decoder = CountHead(
@@ -1585,13 +1584,13 @@ class CountDecoder(nn.Module):
                 drop=dropout,
                 layer_norm=layer_norm,
             )  # New MLP layer
-            self.condition_layer_celltype = Mlp(
-                in_features=d_model,
-                hidden_features=d_condc * 2,
-                out_features=d_condc,
-                drop=dropout,
-                layer_norm=layer_norm,
-            )
+            # self.condition_layer_celltype = Mlp(
+            #     in_features=d_model,
+            #     hidden_features=d_condc * 2,
+            #     out_features=d_condc,
+            #     drop=dropout,
+            #     layer_norm=layer_norm,
+            # )
 
     def forward(
         self,
@@ -1657,7 +1656,7 @@ class CountDecoder(nn.Module):
             cls_embedding = outputs[t]['mean_embedding']
             if self.add_cell_time:
                 if self.use_positional_encoding and self.pos_embedding is not None:
-                    condition_emb = self.pos_embedding.time_pe[:, t + 1].to(
+                    condition_emb_time = self.pos_embedding.time_pe[:, t + 1].to(
                         outputs[t]['mean_embedding'].device
                     )
                 else:
@@ -1665,16 +1664,16 @@ class CountDecoder(nn.Module):
                     condition_emb_time = self.condition_layer_time(
                         self.condition_dict_oh[t].to(device)
                     )
-                    condition_emb_celltype = self.condition_layer_celltype(
-                        outputs[t]['dec_embedding'][:, 1, :]
-                    )
+                    # condition_emb_celltype = self.condition_layer_celltype(
+                    #     outputs[t]['dec_embedding'][:, 1, :]
+                    # )
                     condition_emb_time = condition_emb_time.unsqueeze(0).expand(
-                        condition_emb_celltype.shape[0], -1
+                        cls_embedding.shape[0], -1
                     )
-                    condition_emb = torch.cat(
-                        (condition_emb_time, condition_emb_celltype), dim=1
-                    )
-                cls_embedding = torch.cat((cls_embedding, condition_emb), dim=-1)
+                    # condition_emb = torch.cat(
+                    #     (condition_emb_time, condition_emb_celltype), dim=1
+                    # )
+                cls_embedding = torch.cat((cls_embedding, condition_emb_time), dim=-1)
                 count_outputs[f'count_output_t{t}'] = self.count_decoder.forward(
                     cls_embedding
                 )

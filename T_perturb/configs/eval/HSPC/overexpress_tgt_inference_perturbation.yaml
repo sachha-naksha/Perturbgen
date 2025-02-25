@@ -44,7 +44,7 @@ trainer:
     - 2
 
 datamodule:
-  batch_size: 64
+  batch_size: 4
   num_workers: 8
   shuffle: False
   split: False

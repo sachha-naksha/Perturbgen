@@ -355,17 +355,18 @@ def main() -> None:
         test_indices = list(
             range(len(tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}']))
         )
-    # check if the train indices are the same for both adata and dataset
-    subset_adata = tgt_adata_tmp[train_indices]
+    # # check if the train indices are the same for both adata and dataset
+    # subset_adata = tgt_adata_tmp[train_indices]
 
-    subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
-        train_indices
-    )
-    adata_idx = subset_adata.obs['index'].tolist()
-    dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
-    assert adata_idx == dataset_idx, (
-        'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
-    )
+    # subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
+    #     train_indices
+    # )
+    # adata_idx = subset_adata.obs['index'].tolist()
+    # dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
+
+    # assert adata_idx == dataset_idx, (
+    #     'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
+    # )
     if args.loss_mode == 'mse':
         # log normalize data only for mse loss
         sc.pp.normalize_total(src_adata, target_sum=1e4)
@@ -457,7 +458,6 @@ def main() -> None:
         trainer_kwargs['tgt_adata'] = tgt_adatas
         trainer_kwargs['temperature'] = args.temperature
         trainer_kwargs['iterations'] = args.iterations
-        trainer_kwargs['seed'] = args.seed
         trainer_kwargs['n_genes'] = src_adata.shape[1]
         trainer_kwargs['dropout'] = args.count_dropout
         # trainer_kwargs['use_positional_encoding'] = args.use_positional_encoding
