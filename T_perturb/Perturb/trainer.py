@@ -20,7 +20,6 @@ from T_perturb.src.utils import (
     map_results_to_genes,
     mask_duplicates_across_batches,
     mask_duplicates_within_batches,
-    mean_nonpadding_embs,
     return_perturbation_adata,
 )
 
@@ -412,228 +411,256 @@ class PerturberTrainer(CytoMeisterTrainer):
             )
         return outputs, perturbed_src, tgt_input_id_dict
 
-    def test_step(self, batch, *args, **kwargs):
-        if self.validation_mode == 'inference':
-            true_outputs, _, true_ids_dict = self.forward(batch, perturbation=False)
-            (
-                perturbed_outputs,
-                _,
-                perturbed_ids_dict,
-            ) = self.forward(batch, perturbation=True)
-        elif self.validation_mode == 'generate':
-            (
-                _,
-                pert_src_input_ids,
-                perturbed_ids_dict,
-            ) = self.forward(batch, perturbation=True)
-            decoder_kwargs = {
-                'tgt_input_id_dict': perturbed_ids_dict,
-                'mask_scheduler': self.mask_scheduler,
-                'can_remask_prev_masked': False,
-                'topk_filter_thres': 0.9,
-                'temperature': self.temperature,
-                'iterations': self.iterations,
-            }
-
-            true_outputs, true_ids_dict = self.transformer.generate(
-                src_input_id=batch['src_input_ids'],
-                genes_to_perturb=self.tgt_pert_tokens,
-                **decoder_kwargs,
-            )
-            perturbed_outputs, generated_ids_dict = self.transformer.generate(
-                src_input_id=pert_src_input_ids,
-                **decoder_kwargs,
-            )
-            for t in self.pred_tps:
-                # pert_ids = perturbed_ids_dict[t].detach().cpu().numpy()
-                true_ids = true_ids_dict[t].detach().cpu().numpy()
-                # ground truth
-                input_ids = batch[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
-
-                test_dict = compute_rouge_score(
-                    rouge=self.rouge,
-                    pred_ids=true_ids,
-                    tgt_ids=input_ids,
-                    rouge_len_list=self.rouge_seq_len_list,
-                    max_seq_length=self.max_seq_length,
-                    test_dict=self.test_dict,
-                )
-                self.test_dict = test_dict
-        else:
-            raise ValueError(
-                f'Invalid perturbation mode: {self.validation_mode}:'
-                f'Choose between "inference" or "generate"'
-            )
-        for t in self.pred_tps:
-            # create a mask for special tokens to exlude
-            # them from the cosine similarity & logits and probs
-            cond_len = len(self.condition_dict)
-            true_gene = true_outputs[t]['dec_embedding'][:, cond_len:, :]
-            # true_logits = true_outputs[t]['dec_logits'][:, 1:, :]
-            perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, cond_len:, :]
-
-            # perturbed_logits = perturbed_outputs[t]['dec_logits'][:, 1:, :]
-
-            # true_probs = torch.softmax(true_logits, dim=-1)
-            # perturbed_probs = torch.softmax(perturbed_logits, dim=-1)
-            # delta_probs = torch.abs(true_probs - perturbed_probs)
-            # token_probs_change = delta_probs.sum(dim=-1)
-            # delta_gene_probs, self.marker_genes = map_results_to_genes(
-            #     token_probs_change,
-            #     mapping_dict=self.gene_to_tgtid,
-            #     token_ids=batch[f'tgt_input_ids_t{t}'],
-            # )
-            gene_cos_sim = cosine_similarity(
-                true_gene,
-                perturbed_gene,
-                dim=-1,
-            )
-
-            gene_cos_sim, self.marker_genes = map_results_to_genes(
-                gene_cos_sim,
-                mapping_dict=self.gene_to_tgtid,
-                token_ids=batch[f'tgt_input_ids_t{t}'],
-            )
-            true_mean_embs = mean_nonpadding_embs(
-                embs=true_gene,  # exclude cls token
-                input_ids=batch[f'tgt_input_ids_t{t}'],
-                mapping_dict=self.gene_to_tgtid,
-                condition_dict=self.condition_dict,
-                perturbation_tokens=self.tgt_pert_tokens,
-                dim=1,
-            )
-            perturbed_mean_cls = mean_nonpadding_embs(
-                embs=perturbed_gene,  # exclude cls token
-                input_ids=batch[f'tgt_input_ids_t{t}'],
-                mapping_dict=self.gene_to_tgtid,
-                condition_dict=self.condition_dict,
-                perturbation_tokens=self.tgt_pert_tokens,
-                perturbation_mode=self.perturbation_mode,
-                dim=1,
-            )
-            mean_cos_sim = cosine_similarity(
-                perturbed_mean_cls,
-                true_mean_embs,
-            )
-            cell_idx = np.array(batch[f'tgt_cell_idx_t{t}'])
-
-            if len(self.test_dict['cell_idx']) == 0:
-                all_cell_idx = np.array([])
+    def apply_mask(self, x, mask):
+        # If x is a PyTorch tensor:
+        if isinstance(x, torch.Tensor):
+            # Ensure mask is a tensor on the correct device and boolean:
+            if not isinstance(mask, torch.Tensor):
+                mask_tensor = torch.tensor(mask, dtype=torch.bool, device=x.device)
             else:
-                all_cell_idx = np.concatenate(self.test_dict['cell_idx'])
-            if self.tgt_pert_tokens is not None:
-                # remove cells where perturbed gene is not present
+                mask_tensor = mask.to(x.device)
+                if mask_tensor.dtype != torch.bool:
+                    mask_tensor = mask_tensor.bool()
+            return x[mask_tensor]
+        # If x is a NumPy array:
+        elif isinstance(x, np.ndarray):
+            # Convert mask to a numpy boolean array:
+            mask_array = np.asarray(mask, dtype=bool)
+            return x[mask_array]
+        # If x is a list:
+        elif isinstance(x, list):
+            # Convert mask to a list of booleans:
+            return [x[i] for i, m in enumerate(mask) if m]
+        else:
+            raise TypeError(
+                f'Unsupported type for x: {type(x)}.'
+                'x must be a PyTorch tensor or NumPy array.'
+            )
+
+    def test_step(self, batch, *args, **kwargs):
+        if self.tgt_pert_tokens is not None:
+            if self.pert_tps is not None:
+                pert_tps_ = self.pert_tps
+            else:
+                pert_tps_ = self.pred_tps
+            # remove cells where perturbed gene is not present
+            tgt_mask_list = []
+            for t in pert_tps_:
                 tgt_mask = torch.isin(
                     batch[f'tgt_input_ids_t{t}'], self.tgt_pert_tokens
                 )
                 tgt_mask = tgt_mask.sum(dim=1).detach().cpu().numpy()
-            if self.src_pert_tokens is not None:
-                src_mask = torch.isin(batch['src_input_ids'], self.src_pert_tokens)
-                src_mask = src_mask.sum(dim=1).detach().cpu().numpy()
-            # combine tgt and src mask
-            if self.tgt_pert_tokens is not None and self.src_pert_tokens is not None:
-                # use logical OR to combine tgt and src mask
-                remove_cells_wo_pert = tgt_mask + src_mask > 0
-            elif self.tgt_pert_tokens is not None:
-                remove_cells_wo_pert = tgt_mask > 0
-            elif self.src_pert_tokens is not None:
-                remove_cells_wo_pert = src_mask > 0
+                tgt_mask_list.append(tgt_mask)
+            tgt_mask = np.sum(tgt_mask_list, axis=0)
+
+        if self.src_pert_tokens is not None:
+            src_mask = torch.isin(batch['src_input_ids'], self.src_pert_tokens)
+            src_mask = src_mask.sum(dim=1).detach().cpu().numpy()
+        # combine tgt and src mask
+        if self.tgt_pert_tokens is not None and self.src_pert_tokens is not None:
+            # use logical OR to combine tgt and src mask
+            remove_cells_wo_pert = tgt_mask + src_mask > 0
+        elif self.tgt_pert_tokens is not None:
+            remove_cells_wo_pert = tgt_mask > 0
+        elif self.src_pert_tokens is not None:
+            remove_cells_wo_pert = src_mask > 0
+        else:
+            remove_cells_wo_pert = np.ones(batch['src_input_ids'].shape[0], dtype=bool)
+        # if all cells are removed where boolean mask is all False
+        if np.sum(remove_cells_wo_pert) > 0:
+            # remove cells without perturbation
+            filtered_batch = {
+                k: self.apply_mask(v, remove_cells_wo_pert)
+                for k, v in batch.items()
+                if v is not None
+            }
+
+            if self.validation_mode == 'inference':
+                true_outputs, _, true_ids_dict = self.forward(
+                    filtered_batch, perturbation=False
+                )
+                (
+                    perturbed_outputs,
+                    _,
+                    perturbed_ids_dict,
+                ) = self.forward(filtered_batch, perturbation=True)
+            elif self.validation_mode == 'generate':
+                (
+                    _,
+                    pert_src_input_ids,
+                    perturbed_ids_dict,
+                ) = self.forward(filtered_batch, perturbation=True)
+                decoder_kwargs = {
+                    'tgt_input_id_dict': perturbed_ids_dict,
+                    'mask_scheduler': self.mask_scheduler,
+                    'can_remask_prev_masked': False,
+                    'topk_filter_thres': 0.9,
+                    'temperature': self.temperature,
+                    'iterations': self.iterations,
+                }
+
+                true_outputs, true_ids_dict = self.transformer.generate(
+                    src_input_id=filtered_batch['src_input_ids'],
+                    genes_to_perturb=self.tgt_pert_tokens,
+                    **decoder_kwargs,
+                )
+                perturbed_outputs, generated_ids_dict = self.transformer.generate(
+                    src_input_id=pert_src_input_ids,
+                    **decoder_kwargs,
+                )
+                for t in self.pred_tps:
+                    # pert_ids = perturbed_ids_dict[t].detach().cpu().numpy()
+                    true_ids = true_ids_dict[t].detach().cpu().numpy()
+                    # ground truth
+                    input_ids = (
+                        filtered_batch[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
+                    )
+
+                    test_dict = compute_rouge_score(
+                        rouge=self.rouge,
+                        pred_ids=true_ids,
+                        tgt_ids=input_ids,
+                        rouge_len_list=self.rouge_seq_len_list,
+                        max_seq_length=self.max_seq_length,
+                        test_dict=self.test_dict,
+                    )
+                    self.test_dict = test_dict
             else:
-                remove_cells_wo_pert = np.ones_like(cell_idx, dtype=bool)
-            cell_idx = cell_idx[remove_cells_wo_pert]
-            (dupl_outside_batch, cell_idx_filter_) = mask_duplicates_across_batches(
-                all_cell_idx, cell_idx
-            )
-            (dupl_within_batch, cell_idx_filter_) = mask_duplicates_within_batches(
-                cell_idx_filter_
-            )
-            # # iterate over the batch and compute the wasserstein distance
-            # wd = []
-            # for i in range(true_cls.shape[0]):
-            #     print(true_cls[i].shape)
-            #     wd.append(wasserstein(
-            #         true_cls[i],
-            #         perturbed_cls[i],
-            #         power=1
-            #     ))
+                raise ValueError(
+                    f'Invalid perturbation mode: {self.validation_mode}:'
+                    f'Choose between "inference" or "generate"'
+                )
 
-            # cls_cos_sim = cls_cos_sim.detach().cpu().to(torch.float16)
-            mean_cos_sim = mean_cos_sim.detach().cpu().to(torch.float16)
-            gene_cos_sim = gene_cos_sim.detach().cpu().to(torch.float16)
-            # true_cls = true_cls.detach().cpu().to(torch.float16)
-            # perturbed_cls = perturbed_cls.detach().cpu().to(torch.float16)
-            true_mean_embs = true_mean_embs.detach().cpu().to(torch.float16)
-            perturbed_mean_cls = perturbed_mean_cls.detach().cpu().to(torch.float16)
-            # token_probs_change = token_probs_change.detach().cpu().to(torch.float16)
-            # delta_probs = delta_probs.detach().cpu().to(torch.float16)
-            # delta_gene_probs = delta_gene_probs.detach().cpu().to(torch.float16)
-            # self.test_dict['cls_cosine_similarity'].append(cls_cos_sim)
-            # remove duplicates
-            mean_cos_sim = mean_cos_sim[remove_cells_wo_pert]
-            gene_cos_sim = gene_cos_sim[remove_cells_wo_pert]
-            true_mean_embs = true_mean_embs[remove_cells_wo_pert]
-            perturbed_mean_cls = perturbed_mean_cls[remove_cells_wo_pert]
+            for t in self.pred_tps:
+                # create a mask for special tokens to exlude
+                # them from the cosine similarity & logits and probs
+                cond_len = len(self.condition_dict)
+                true_gene = true_outputs[t]['dec_embedding'][:, cond_len:, :]
+                true_mean_embs = true_outputs[t]['mean_embedding']
+                # true_logits = true_outputs[t]['dec_logits'][:, 1:, :]
+                perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, cond_len:, :]
+                perturbed_mean_embs = perturbed_outputs[t]['mean_embedding']
 
-            mean_cos_sim = mean_cos_sim[dupl_outside_batch]
-            gene_cos_sim = gene_cos_sim[dupl_outside_batch]
-            true_mean_embs = true_mean_embs[dupl_outside_batch]
-            perturbed_mean_cls = perturbed_mean_cls[dupl_outside_batch]
-            mean_cos_sim = mean_cos_sim[dupl_within_batch]
-            gene_cos_sim = gene_cos_sim[dupl_within_batch]
-            true_mean_embs = true_mean_embs[dupl_within_batch]
-            perturbed_mean_cls = perturbed_mean_cls[dupl_within_batch]
+                # perturbed_logits = perturbed_outputs[t]['dec_logits'][:, 1:, :]
 
-            self.test_dict['mean_cosine_similarity'].append(mean_cos_sim)
-            self.test_dict['gene_cosine_similarity'].append(gene_cos_sim)
-            self.test_dict['true_cls'].append(true_mean_embs)
-            self.test_dict['perturbed_cls'].append(perturbed_mean_cls)
+                # true_probs = torch.softmax(true_logits, dim=-1)
+                # perturbed_probs = torch.softmax(perturbed_logits, dim=-1)
+                # delta_probs = torch.abs(true_probs - perturbed_probs)
+                # token_probs_change = delta_probs.sum(dim=-1)
+                # delta_gene_probs, self.marker_genes = map_results_to_genes(
+                #     token_probs_change,
+                #     mapping_dict=self.gene_to_tgtid,
+                #     token_ids=batch[f'tgt_input_ids_t{t}'],
+                # )
+                gene_cos_sim = cosine_similarity(
+                    true_gene,
+                    perturbed_gene,
+                    dim=-1,
+                )
 
-            # if self.gene_module_list is not None:
-            #     true_gm_embs = return_gene_embeddings(
-            #         true_gene,
-            #         self.gene_module_dict,
-            #         batch[f'tgt_input_ids_t{t}'],
-            #     )
-            #     perturbed_gm_embs = return_gene_embeddings(
-            #         perturbed_gene,
-            #         self.gene_module_dict,
-            #         batch[f'tgt_input_ids_t{t}'],
-            #     )
-            #     true_background_embs = return_gene_embeddings(
-            #         true_gene,
-            #         self.background_gene_dict,
-            #         batch[f'tgt_input_ids_t{t}'],
-            #     )
-            #     perturbed_background_embs = return_gene_embeddings(
-            #         perturbed_gene,
-            #         self.background_gene_dict,
-            #         batch[f'tgt_input_ids_t{t}'],
-            #     )
-            # # convert float32 to calculate wasserstein distance
-            # true_gm_embs = true_gm_embs.detach().cpu().to(torch.float32)
-            # perturbed_gm_embs = perturbed_gm_embs.detach().cpu().to(torch.float32)
-            # true_background_embs = (
-            #     true_background_embs.detach().cpu().to(torch.float32)
-            # )
-            # perturbed_background_embs = (
-            #     perturbed_background_embs.detach().cpu().to(torch.float32)
-            # )
-            # self.test_dict['true_gm_embs'].append(true_gm_embs)
-            # self.test_dict['perturbed_gm_embs'].append(perturbed_gm_embs)
-            # self.test_dict['true_background_embs'].append(true_background_embs)
-            # self.test_dict['perturbed_background_embs'].append(
-            #     perturbed_background_embs
-            # )
-            # return obs_key
-            self.test_dict['cell_idx'].append(cell_idx_filter_)
-            if len(self.var_list) > 0:
-                for var in self.var_list:
-                    # remove duplicates
-                    var_values = np.array(batch[f'{var}_t{t}'])
-                    var_values = var_values[remove_cells_wo_pert]
-                    var_values = var_values[dupl_outside_batch]
-                    var_values = var_values[dupl_within_batch]
-                    self.test_dict[var].append(var_values)
+                gene_cos_sim, self.marker_genes = map_results_to_genes(
+                    gene_cos_sim,
+                    mapping_dict=self.gene_to_tgtid,
+                    token_ids=filtered_batch[f'tgt_input_ids_t{t}'],
+                )
+                mean_cos_sim = cosine_similarity(
+                    perturbed_mean_embs,
+                    true_mean_embs,
+                )
+
+                cell_idx = np.array(filtered_batch[f'tgt_cell_idx_t{t}'])
+
+                if len(self.test_dict['cell_idx']) == 0:
+                    all_cell_idx = np.array([])
+                else:
+                    all_cell_idx = np.concatenate(self.test_dict['cell_idx'])
+                # remove duplicates
+                (dupl_outside_batch, cell_idx_filter_) = mask_duplicates_across_batches(
+                    all_cell_idx, cell_idx
+                )
+                (dupl_within_batch, cell_idx_filter_) = mask_duplicates_within_batches(
+                    cell_idx_filter_
+                )
+                # # iterate over the batch and compute the wasserstein distance
+                # wd = []
+                # for i in range(true_cls.shape[0]):
+                #     print(true_cls[i].shape)
+                #     wd.append(wasserstein(
+                #         true_cls[i],
+                #         perturbed_cls[i],
+                #         power=1
+                #     ))
+
+                # cls_cos_sim = cls_cos_sim.detach().cpu().to(torch.float16)
+                mean_cos_sim = mean_cos_sim.detach().cpu().to(torch.float16)
+                gene_cos_sim = gene_cos_sim.detach().cpu().to(torch.float16)
+                # true_cls = true_cls.detach().cpu().to(torch.float16)
+                # perturbed_cls = perturbed_cls.detach().cpu().to(torch.float16)
+                true_mean_embs = true_mean_embs.detach().cpu().to(torch.float16)
+                perturbed_mean_embs = (
+                    perturbed_mean_embs.detach().cpu().to(torch.float16)
+                )
+
+                mean_cos_sim = mean_cos_sim[dupl_outside_batch]
+                gene_cos_sim = gene_cos_sim[dupl_outside_batch]
+                true_mean_embs = true_mean_embs[dupl_outside_batch]
+                perturbed_mean_embs = perturbed_mean_embs[dupl_outside_batch]
+                mean_cos_sim = mean_cos_sim[dupl_within_batch]
+                gene_cos_sim = gene_cos_sim[dupl_within_batch]
+                true_mean_embs = true_mean_embs[dupl_within_batch]
+                perturbed_mean_embs = perturbed_mean_embs[dupl_within_batch]
+                self.test_dict['mean_cosine_similarity'].append(mean_cos_sim)
+                self.test_dict['gene_cosine_similarity'].append(gene_cos_sim)
+                self.test_dict['true_cls'].append(true_mean_embs)
+                self.test_dict['perturbed_cls'].append(perturbed_mean_embs)
+
+                # if self.gene_module_list is not None:
+                #     true_gm_embs = return_gene_embeddings(
+                #         true_gene,
+                #         self.gene_module_dict,
+                #         batch[f'tgt_input_ids_t{t}'],
+                #     )
+                #     perturbed_gm_embs = return_gene_embeddings(
+                #         perturbed_gene,
+                #         self.gene_module_dict,
+                #         batch[f'tgt_input_ids_t{t}'],
+                #     )
+                #     true_background_embs = return_gene_embeddings(
+                #         true_gene,
+                #         self.background_gene_dict,
+                #         batch[f'tgt_input_ids_t{t}'],
+                #     )
+                #     perturbed_background_embs = return_gene_embeddings(
+                #         perturbed_gene,
+                #         self.background_gene_dict,
+                #         batch[f'tgt_input_ids_t{t}'],
+                #     )
+                # # convert float32 to calculate wasserstein distance
+                # true_gm_embs = true_gm_embs.detach().cpu().to(torch.float32)
+                # perturbed_gm_embs = perturbed_gm_embs.detach().cpu().to(torch.float32)
+                # true_background_embs = (
+                #     true_background_embs.detach().cpu().to(torch.float32)
+                # )
+                # perturbed_background_embs = (
+                #     perturbed_background_embs.detach().cpu().to(torch.float32)
+                # )
+                # self.test_dict['true_gm_embs'].append(true_gm_embs)
+                # self.test_dict['perturbed_gm_embs'].append(perturbed_gm_embs)
+                # self.test_dict['true_background_embs'].append(true_background_embs)
+                # self.test_dict['perturbed_background_embs'].append(
+                #     perturbed_background_embs
+                # )
+                # return obs_key
+                self.test_dict['cell_idx'].append(cell_idx_filter_)
+                if len(self.var_list) > 0:
+                    for var in self.var_list:
+                        # remove duplicates
+                        var_values = np.array(filtered_batch[f'{var}_t{t}'])
+                        var_values = var_values[dupl_outside_batch]
+                        var_values = var_values[dupl_within_batch]
+                        self.test_dict[var].append(var_values)
+        else:
+            pass
 
     def compute_non_zero_mean(self, embs: torch.Tensor):
         non_zero_mask = embs != 0

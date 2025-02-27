@@ -26,10 +26,8 @@ trainer:
   pos_encoding_mode: 'time_pos_sin'
   return_attn: false
   perturbation_mode: 'overexpress'
-  # genes_to_perturb:
-  #   - 'DNTT'
-  tgt_tokens_to_perturb:
-    - 1396
+  genes_to_perturb:
+    - 'MPO'
   validation_mode: 'inference'
   perturbation_sequence:
     - 'tgt'
@@ -42,9 +40,12 @@ trainer:
   pred_tps:
     - 1
     - 2
+  pert_tps:
+    - 1
+  exclude_src: true
 
 datamodule:
-  batch_size: 4
+  batch_size: 128
   num_workers: 8
   shuffle: False
   split: False

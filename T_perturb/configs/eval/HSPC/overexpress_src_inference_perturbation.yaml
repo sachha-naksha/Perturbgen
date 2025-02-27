@@ -28,7 +28,7 @@ trainer:
   return_attn: false
   perturbation_mode: 'overexpress'
   genes_to_perturb:
-    - 'DNTT'
+    - 'MPO'
   validation_mode: 'inference'
   perturbation_sequence:
     - 'src'

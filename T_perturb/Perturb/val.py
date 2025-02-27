@@ -90,6 +90,20 @@ def main() -> None:
             # else:
             #     filtered_dataset = dataset.select(idx_)
             filter_idx.extend(idx_)
+    if len(filter_idx) > 0:
+        # apply condition filter to all datasets
+        filter_idx = list(set(filter_idx))
+        for i in range(len(tgt_datasets)):
+            t = i + 1
+            tgt_dataset = tgt_datasets[f'tgt_dataset_t{t}']
+            tgt_adata = tgt_adatas[f'tgt_h5ad_t{t}']
+            tgt_dataset = tgt_dataset.select(filter_idx)
+            tgt_datasets[f'tgt_dataset_t{t}'] = tgt_dataset
+            tgt_adata = tgt_adata[filter_idx, :]
+            tgt_adatas[f'tgt_h5ad_t{t}'] = tgt_adata
+        # for i, dataset in tgt_datasets.items():
+        #     tgt_datasets[i] = dataset.select(filter_idx)
+        src_dataset = src_dataset.select(filter_idx)
 
     # Define path to load checkpoint
     n_total_tps = len(tgt_adatas)

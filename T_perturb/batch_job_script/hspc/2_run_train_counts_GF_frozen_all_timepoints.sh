@@ -4,11 +4,11 @@
 #BSUB -n 4 # number of cores
 #BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
-#BSUB -o logs/hspc_masking_%J.out # output file
-#BSUB -e logs/hspc_masking_%J.err # error file
+#BSUB -o logs/hspc_count_%J.out # output file
+#BSUB -e logs/hspc_count_%J.err # error file
 #BSUB -M 20000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>20000] rusage[mem=20000]' # RAM memory part 1. Default: 100MB
-#BSUB -J hspc_masking # job name
+#BSUB -J hspc_count # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -42,14 +42,15 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --splitting_mode stratified \
 --split_obs celltype_v2 \
 --output_dir $RES_DIR/$RES_NAME/ \
+--ckpt_masking_path "T_perturb/T_perturb/plt/res/hspc/pbmc_median/checkpoints/20250123_1633_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_sin_m_cosine_tp_1-2_s_42-epoch=19.ckpt" \
 --src_dataset "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_src/stem.dataset" \
 --tgt_dataset_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt" \
 --src_adata "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_src/stem.h5ad" \
 --tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_tgt" \
 --mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc_pbmc_median/token_id_to_genename_10000_hvg.pkl" \
---batch_size 16 \
+--batch_size 64 \
 --max_len 2200 \
---epochs 5 \
+--epochs 20 \
 --tgt_vocab_size 5710 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \

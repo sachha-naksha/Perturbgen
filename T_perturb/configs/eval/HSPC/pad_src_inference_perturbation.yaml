@@ -28,7 +28,7 @@ trainer:
   return_attn: false
   perturbation_mode: 'pad'
   genes_to_perturb:
-    - 'DNTT'
+    - 'MPO'
   validation_mode: 'inference'
   perturbation_sequence:
     - 'src'
@@ -44,7 +44,6 @@ trainer:
 datamodule:
   batch_size: 64
   num_workers: 8
-  context_tps: [2]
   shuffle: False
   split: False
   max_len: 2200
