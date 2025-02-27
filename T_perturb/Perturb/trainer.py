@@ -229,6 +229,8 @@ class PerturberTrainer(CytoMeisterTrainer):
         for key in [
             # 'cls_cosine_similarity',
             'mean_cosine_similarity',
+            'mean_cosine_similarity_l1',
+            'mean_cosine_similarity_lmid',
             'gene_cosine_similarity',
             'delta_probs',
             'delta_gene_probs',
@@ -537,9 +539,13 @@ class PerturberTrainer(CytoMeisterTrainer):
                 cond_len = len(self.condition_dict)
                 true_gene = true_outputs[t]['dec_embedding'][:, cond_len:, :]
                 true_mean_embs = true_outputs[t]['mean_embedding']
+                true_mean_embs_l1 = true_outputs[t]['mean_embedding_l1']
+                true_mean_embs_lmid = true_outputs[t]['mean_embedding_lmid']
                 # true_logits = true_outputs[t]['dec_logits'][:, 1:, :]
                 perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, cond_len:, :]
                 perturbed_mean_embs = perturbed_outputs[t]['mean_embedding']
+                perturbed_mean_embs_l1 = perturbed_outputs[t]['mean_embedding_l1']
+                perturbed_mean_embs_lmid = perturbed_outputs[t]['mean_embedding_lmid']
 
                 # perturbed_logits = perturbed_outputs[t]['dec_logits'][:, 1:, :]
 
@@ -567,6 +573,17 @@ class PerturberTrainer(CytoMeisterTrainer):
                     perturbed_mean_embs,
                     true_mean_embs,
                 )
+                mean_cos_sim_l1 = cosine_similarity(
+                    perturbed_mean_embs_l1,
+                    true_mean_embs_l1,
+                )
+                mean_cos_sim_lmid = cosine_similarity(
+                    perturbed_mean_embs_lmid,
+                    true_mean_embs_lmid,
+                )
+                print('mean_cos_sim', mean_cos_sim)
+                print('mean_cos_sim_l1', mean_cos_sim_l1)
+                print('mean_cos_sim_lmid', mean_cos_sim_lmid)
 
                 cell_idx = np.array(filtered_batch[f'tgt_cell_idx_t{t}'])
 
@@ -610,6 +627,8 @@ class PerturberTrainer(CytoMeisterTrainer):
                 true_mean_embs = true_mean_embs[dupl_within_batch]
                 perturbed_mean_embs = perturbed_mean_embs[dupl_within_batch]
                 self.test_dict['mean_cosine_similarity'].append(mean_cos_sim)
+                self.test_dict['mean_cosine_similarity_l1'].append(mean_cos_sim_l1)
+                self.test_dict['mean_cosine_similarity_lmid'].append(mean_cos_sim_lmid)
                 self.test_dict['gene_cosine_similarity'].append(gene_cos_sim)
                 self.test_dict['true_cls'].append(true_mean_embs)
                 self.test_dict['perturbed_cls'].append(perturbed_mean_embs)

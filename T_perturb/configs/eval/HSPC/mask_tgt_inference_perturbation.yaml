@@ -6,6 +6,8 @@ data:
   cond_list:
     - 'celltype_v2'
     - 'diff_state'
+  filter_cond: 'GMP'
+  filter_var: 'celltype_v2'
 
 trainer:
   tgt_vocab_size: 5710

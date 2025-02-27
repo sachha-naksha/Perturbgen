@@ -276,6 +276,7 @@ class PerturberMasking(CytoMeister):
     ):
         self_attn_list = []
         cross_attn_list = []
+        current_dec_l = 1
         for dec_layer in self.decoder_block:
             # see if concatenation of cls embedding
             dec_embedding, self_attn_weights, cross_attn_weights = dec_layer(
@@ -288,6 +289,11 @@ class PerturberMasking(CytoMeister):
                 self_attn_list.append(self_attn_weights)
             if cross_attn_weights is not None:
                 cross_attn_list.append(cross_attn_weights)
+            if current_dec_l == 1:
+                dec_embedding_l1 = dec_embedding
+            elif current_dec_l == len(self.decoder_block) // 2:
+                dec_embedding_lmid = dec_embedding
+            current_dec_l += 1
         # also convert to float 16 for memory efficiency
         if len(self_attn_list) > 0:
             self_attn_weights = (
@@ -307,8 +313,26 @@ class PerturberMasking(CytoMeister):
                 condition_dict=self.condition_dict,
                 perturbation_tokens=self.tgt_pert_tokens,
             )
+            if dec_embedding_l1 is not None:
+                mean_embedding_l1 = mean_nonpadding_embs(
+                    embs=dec_embedding_l1,
+                    input_ids=tgt_input_id,
+                    mapping_dict=self.gene_to_rowid,
+                    condition_dict=self.condition_dict,
+                    perturbation_tokens=self.tgt_pert_tokens,
+                )
+            if dec_embedding_lmid is not None:
+                mean_embedding_lmid = mean_nonpadding_embs(
+                    embs=dec_embedding_lmid,
+                    input_ids=tgt_input_id,
+                    mapping_dict=self.gene_to_rowid,
+                    condition_dict=self.condition_dict,
+                    perturbation_tokens=self.tgt_pert_tokens,
+                )
         else:
             mean_embedding = None
+            mean_embedding_l1 = None
+            mean_embedding_lmid = None
 
         outputs = {
             'dec_embedding': dec_embedding,
@@ -317,5 +341,7 @@ class PerturberMasking(CytoMeister):
             'dec_logits': decoder_logits,
             'labels': labels,
             'mean_embedding': mean_embedding,
+            'mean_embedding_l1': mean_embedding_l1,
+            'mean_embedding_lmid': mean_embedding_lmid,
         }
         return outputs

@@ -906,6 +906,18 @@ def return_perturbation_adata(
     perturbed_cls = torch.cat(test_dict['perturbed_cls']).numpy()
     # cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
+    if 'mean_cosine_similarity_l1' in test_dict.keys():
+        mean_cos_similarity_l1 = torch.cat(
+            test_dict['mean_cosine_similarity_l1']
+        ).numpy()
+    else:
+        mean_cos_similarity_l1 = None
+    if 'mean_cosine_similarity_lmid' in test_dict.keys():
+        mean_cos_similarity_lmid = torch.cat(
+            test_dict['mean_cosine_similarity_lmid']
+        ).numpy()
+    else:
+        mean_cos_similarity_lmid = None
     # delta_probs = torch.cat(test_dict['delta_probs']).numpy()
     # wasserstein_distance = np.concatenate(test_dict['wasserstein_distance'])
     # adata.varm
@@ -924,6 +936,8 @@ def return_perturbation_adata(
         'perturbed_cls': perturbed_cls,
         # 'cls_cos_similarity': cls_cos_similarity,
         'mean_cos_similarity': mean_cos_similarity,
+        'mean_cos_similarity_l1': mean_cos_similarity_l1,
+        'mean_cos_similarity_lmid': mean_cos_similarity_lmid,
         # 'delta_probs': delta_probs,
     }
     # varm_dict = {
