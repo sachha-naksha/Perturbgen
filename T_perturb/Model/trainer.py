@@ -719,7 +719,8 @@ class CountDecoderTrainer(LightningModule):
         ] = 'time_pos_sin',
         mask_scheduler: str = 'cosine',
         sequence_length: int = 2048,
-        return_rouge_score=True,
+        return_rouge_score: bool = True,
+        context_mode: bool = True,
         encoder_path: str | None = None,
         var_list: List[str] | None = None,
         tgt_adata: ad.AnnData | None = None,
@@ -740,6 +741,8 @@ class CountDecoderTrainer(LightningModule):
         # only set precision for GPU
 
         set_matmul_precision_for_device(precision)
+        print('encoder_path', encoder_path)
+        print('mapping_dict_path', mapping_dict_path)
         if mapping_dict_path is not None:
             with open(
                 mapping_dict_path,
@@ -766,6 +769,7 @@ class CountDecoderTrainer(LightningModule):
             pos_encoding_mode=pos_encoding_mode,
             condition_dict=condition_dict,
             gene_to_rowid=gene_to_rowid,
+            context_mode=context_mode,
         )
         self.pos_encoding_mode = pos_encoding_mode
         # load PETRA checkpoint

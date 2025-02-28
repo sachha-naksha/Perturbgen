@@ -8,7 +8,7 @@ import torch
 from einops import rearrange
 from torch import nn
 
-from T_perturb.Modules.T_model import CytoMeister
+from T_perturb.Modules.T_model import CountDecoder, CytoMeister
 from T_perturb.src.utils import (
     gumbel_sample,
     mean_nonpadding_embs,
@@ -345,3 +345,48 @@ class PerturberMasking(CytoMeister):
             'mean_embedding_lmid': mean_embedding_lmid,
         }
         return outputs
+
+
+class PerturberCountDecoder(CountDecoder):
+    def __init__(
+        self,
+        pretrained_model: nn.Module = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+
+        self.pretrained_model = pretrained_model
+
+    def forward(
+        self,
+        src_input_id: torch.Tensor,
+        tgt_input_id_dict: dict,
+    ):
+        outputs = self.pretrained_model(
+            src_input_id=src_input_id,
+            tgt_input_id_dict=tgt_input_id_dict,
+            not_masked=True,
+        )
+        count_outputs = {}
+        for t in self.pred_tps:
+            cls_embedding = outputs[t]['mean_embedding']
+            if self.add_cell_time:
+                if self.use_positional_encoding and self.pos_embedding is not None:
+                    # Use time-based PE
+                    condition_emb_time = self.pos_embedding.time_pe[:, t + 1]
+                else:
+                    device = next(
+                        self.parameters()
+                    ).device  # Get the device of the model
+                    condition_emb_time = self.condition_layer_time(
+                        self.condition_dict_oh[t].to(device)
+                    )
+                    condition_emb_time = condition_emb_time.unsqueeze(0).expand(
+                        cls_embedding.shape[0], -1
+                    )
+                cls_embedding = torch.cat((cls_embedding, condition_emb_time), dim=1)
+            count_outputs_tmp = self.count_decoder.forward(cls_embedding)
+            count_outputs[f'count_output_t{t}'] = count_outputs_tmp
+
+        return outputs, count_outputs

@@ -12,8 +12,8 @@ import torch
 # from geneformer.tokenizer import TOKEN_DICTIONARY_FILE
 from torch.nn.functional import cosine_similarity
 
-from T_perturb.Model.trainer import CytoMeisterTrainer
-from T_perturb.Perturb.T_model import PerturberMasking
+from T_perturb.Model.trainer import CountDecoderTrainer
+from T_perturb.Perturb.T_model import PerturberCountDecoder, PerturberMasking
 from T_perturb.src.utils import (
     compute_rouge_score,
     concat_cond_tokens,
@@ -24,14 +24,9 @@ from T_perturb.src.utils import (
 )
 
 
-class PerturberTrainer(CytoMeisterTrainer):
+class PerturberTrainer(CountDecoderTrainer):
     def __init__(
         self,
-        generate: bool = False,
-        sequence_length: int = 2048,
-        temperature: float = 2.0,
-        iterations: int = 18,
-        mapping_dict_path: str | None = None,
         genes_to_perturb: List[str] | None = None,
         src_tokens_to_perturb: List[int] | None = None,
         tgt_tokens_to_perturb: List[int] | None = None,
@@ -42,6 +37,7 @@ class PerturberTrainer(CytoMeisterTrainer):
         pert_tps: List[int] | None = None,
         exclude_src: bool = False,
         tokenid_to_rowid_path: str | None = None,
+        use_count_decoder: bool = False,
         # gene_module_list: List[str] | None = None,
         # num_of_background_genes: int | None = None,
         *args,
@@ -100,18 +96,15 @@ class PerturberTrainer(CytoMeisterTrainer):
             # else:
             #     self.gene_module_list = None
         # dictionary to map gene names to row ids in tgt
-        if mapping_dict_path is not None:
+        if kwargs['mapping_dict_path'] is not None:
             with open(
-                mapping_dict_path,
+                kwargs['mapping_dict_path'],
                 'rb',
             ) as f:
                 rowid_to_gene = pickle.load(f)
             gene_to_rowid = {v: k for k, v in rowid_to_gene.items()}
             self.gene_to_tgtid = gene_to_rowid
 
-            # find corresponding special for dictionary keys '<>'
-            special_tokens = [k for k, v in rowid_to_gene.items() if v.startswith('<')]
-            self.special_tokens = special_tokens
         # dictionary to map gene names to row ids in src
         if tokenid_to_rowid_path is not None:
             with open(
@@ -199,7 +192,7 @@ class PerturberTrainer(CytoMeisterTrainer):
             f'- Perturbation mode: {perturbation_mode}\n'
             f'- Perturbation tps: {pert_tps}\n'
         )
-        self.transformer = PerturberMasking(
+        self.pretrained_model = PerturberMasking(
             tgt_vocab_size=kwargs['tgt_vocab_size'],
             d_model=kwargs['d_model'],
             num_heads=kwargs['num_heads'],
@@ -214,17 +207,36 @@ class PerturberTrainer(CytoMeisterTrainer):
             encoder_path=kwargs['encoder_path'],
             mask_scheduler=kwargs['mask_scheduler'],
             pos_encoding_mode=kwargs['pos_encoding_mode'],
-            return_attn=kwargs['return_attn'],
             context_mode=kwargs['context_mode'],
             condition_dict=kwargs['condition_dict'],
             gene_to_rowid=gene_to_rowid,
             tgt_pert_tokens=tgt_pert_tokens,
         )
-
-        self.generate = generate
-        self.sequence_length = sequence_length
-        self.temperature = temperature
-        self.iterations = iterations
+        if use_count_decoder:
+            self.decoder = PerturberCountDecoder(
+                pretrained_model=self.pretrained_model,
+                loss_mode=kwargs['loss_mode'],
+                d_condc=kwargs['d_condc'] if 'd_condc' in kwargs else None,
+                d_condt=kwargs['d_condt'] if 'd_condt' in kwargs else None,
+                layer_norm=kwargs['layer_norm'] if 'layer_norm' in kwargs else False,
+                max_seq_length=kwargs['max_seq_length'],
+                use_positional_encoding=(
+                    kwargs['use_positional_encoding']
+                    if 'use_positional_encoding' in kwargs
+                    else False
+                ),
+                encoder=kwargs['encoder'],
+                pos_encoding_mode=kwargs['pos_encoding_mode'],
+                add_cell_time=kwargs['add_cell_time']
+                if 'add_cell_time' in kwargs
+                else None,
+                d_model=kwargs['d_model'],
+                dropout=kwargs['dropout'],
+                pred_tps=kwargs['pred_tps'],
+                context_tps=kwargs['context_tps'] if 'context_tps' in kwargs else None,
+                n_total_tps=kwargs['n_total_tps'],
+                n_genes=kwargs['n_genes'],
+            )
 
         for key in [
             # 'cls_cosine_similarity',
@@ -241,6 +253,8 @@ class PerturberTrainer(CytoMeisterTrainer):
             'perturbed_gm_embs',
             'true_background_embs',
             'perturbed_background_embs',
+            'true_counts',
+            'pert_counts',
         ]:
             self.test_dict[key] = []
 
@@ -252,6 +266,17 @@ class PerturberTrainer(CytoMeisterTrainer):
         self.encoder = kwargs['encoder']
         self.pos_encoding_mode = kwargs['pos_encoding_mode']
         self.mask_scheduler = kwargs['mask_scheduler']
+        self.use_count_decoder = use_count_decoder
+        self.pad_token_id = self.gene_to_tgtid['<pad>']
+
+    def on_load_checkpoint(self, checkpoint):
+        # Inspect state_dict entries
+        state_dict = checkpoint.get('state_dict', checkpoint)
+        # Remove unexpected keys: "onehot"
+        keys_to_remove = ['onehot']
+        for key in keys_to_remove:
+            if key in state_dict:
+                del state_dict[key]  # Remove unwanted keys
 
     def delete_token(
         self,
@@ -332,7 +357,7 @@ class PerturberTrainer(CytoMeisterTrainer):
                         replace_token, dtype=torch.long, device=self.device
                     )
                 elif self.perturbation_mode == 'pad':
-                    replace_token = self.gene_to_tgtid['<pad>']
+                    replace_token = self.pad_token_id
                     replace_token = torch.tensor(
                         replace_token, dtype=torch.long, device=self.device
                     )
@@ -400,18 +425,41 @@ class PerturberTrainer(CytoMeisterTrainer):
                 perturbed_src = batch['src_input_ids']
 
         if self.validation_mode == 'inference':
-            outputs = self.transformer(
-                src_input_id=perturbed_src,
-                tgt_input_id_dict=tgt_input_id_dict,
-                not_masked=True,
-            )
+            if (perturbation is False) or (self.use_count_decoder is False):
+                # true counts do not need to be computed
+                outputs = self.pretrained_model(
+                    src_input_id=perturbed_src,
+                    tgt_input_id_dict=tgt_input_id_dict,
+                    not_masked=True,
+                )
+                count_output = None
+            else:
+                outputs, count_outputs = self.decoder(
+                    src_input_id=perturbed_src,
+                    tgt_input_id_dict=tgt_input_id_dict,
+                )
+                _, count_output = self.compute_count_loss(
+                    count_outputs, batch, n_samples=self.n_samples
+                )
+
         else:
-            outputs = self.transformer.forward(
-                src_input_id=batch['src_input_ids'],
-                tgt_input_id_dict=tgt_input_id_dict,
-                not_masked=self.return_embeddings,
-            )
-        return outputs, perturbed_src, tgt_input_id_dict
+            if (perturbation is False) or (self.use_count_decoder is False):
+                outputs = self.pretrained_model.forward(
+                    src_input_id=perturbed_src,
+                    tgt_input_id_dict=tgt_input_id_dict,
+                    not_masked=self.return_embeddings,
+                )
+                count_output = None
+
+            else:
+                outputs, count_outputs = self.decoder(
+                    src_input_id=batch['src_input_ids'],
+                    tgt_input_id_dict=tgt_input_id_dict,
+                )
+                _, count_output = self.compute_count_loss(
+                    count_outputs, batch, n_samples=self.n_samples
+                )
+        return (outputs, perturbed_src, tgt_input_id_dict, count_output)
 
     def apply_mask(self, x, mask):
         # If x is a PyTorch tensor:
@@ -478,19 +526,21 @@ class PerturberTrainer(CytoMeisterTrainer):
             }
 
             if self.validation_mode == 'inference':
-                true_outputs, _, true_ids_dict = self.forward(
+                true_outputs, _, true_ids_dict, _ = self.forward(
                     filtered_batch, perturbation=False
                 )
                 (
                     perturbed_outputs,
                     _,
                     perturbed_ids_dict,
+                    pert_counts,
                 ) = self.forward(filtered_batch, perturbation=True)
             elif self.validation_mode == 'generate':
                 (
                     _,
                     pert_src_input_ids,
                     perturbed_ids_dict,
+                    pert_counts,
                 ) = self.forward(filtered_batch, perturbation=True)
                 decoder_kwargs = {
                     'tgt_input_id_dict': perturbed_ids_dict,
@@ -501,12 +551,12 @@ class PerturberTrainer(CytoMeisterTrainer):
                     'iterations': self.iterations,
                 }
 
-                true_outputs, true_ids_dict = self.transformer.generate(
+                true_outputs, true_ids_dict = self.pretrained_model.generate(
                     src_input_id=filtered_batch['src_input_ids'],
                     genes_to_perturb=self.tgt_pert_tokens,
                     **decoder_kwargs,
                 )
-                perturbed_outputs, generated_ids_dict = self.transformer.generate(
+                perturbed_outputs, generated_ids_dict = self.pretrained_model.generate(
                     src_input_id=pert_src_input_ids,
                     **decoder_kwargs,
                 )
@@ -581,9 +631,6 @@ class PerturberTrainer(CytoMeisterTrainer):
                     perturbed_mean_embs_lmid,
                     true_mean_embs_lmid,
                 )
-                print('mean_cos_sim', mean_cos_sim)
-                print('mean_cos_sim_l1', mean_cos_sim_l1)
-                print('mean_cos_sim_lmid', mean_cos_sim_lmid)
 
                 cell_idx = np.array(filtered_batch[f'tgt_cell_idx_t{t}'])
 
@@ -610,6 +657,8 @@ class PerturberTrainer(CytoMeisterTrainer):
 
                 # cls_cos_sim = cls_cos_sim.detach().cpu().to(torch.float16)
                 mean_cos_sim = mean_cos_sim.detach().cpu().to(torch.float16)
+                mean_cos_sim_l1 = mean_cos_sim_l1.detach().cpu().to(torch.float16)
+                mean_cos_sim_lmid = mean_cos_sim_lmid.detach().cpu().to(torch.float16)
                 gene_cos_sim = gene_cos_sim.detach().cpu().to(torch.float16)
                 # true_cls = true_cls.detach().cpu().to(torch.float16)
                 # perturbed_cls = perturbed_cls.detach().cpu().to(torch.float16)
@@ -619,10 +668,14 @@ class PerturberTrainer(CytoMeisterTrainer):
                 )
 
                 mean_cos_sim = mean_cos_sim[dupl_outside_batch]
+                mean_cos_sim_l1 = mean_cos_sim_l1[dupl_outside_batch]
+                mean_cos_sim_lmid = mean_cos_sim_lmid[dupl_outside_batch]
                 gene_cos_sim = gene_cos_sim[dupl_outside_batch]
                 true_mean_embs = true_mean_embs[dupl_outside_batch]
                 perturbed_mean_embs = perturbed_mean_embs[dupl_outside_batch]
                 mean_cos_sim = mean_cos_sim[dupl_within_batch]
+                mean_cos_sim_l1 = mean_cos_sim_l1[dupl_within_batch]
+                mean_cos_sim_lmid = mean_cos_sim_lmid[dupl_within_batch]
                 gene_cos_sim = gene_cos_sim[dupl_within_batch]
                 true_mean_embs = true_mean_embs[dupl_within_batch]
                 perturbed_mean_embs = perturbed_mean_embs[dupl_within_batch]
@@ -632,7 +685,18 @@ class PerturberTrainer(CytoMeisterTrainer):
                 self.test_dict['gene_cosine_similarity'].append(gene_cos_sim)
                 self.test_dict['true_cls'].append(true_mean_embs)
                 self.test_dict['perturbed_cls'].append(perturbed_mean_embs)
-
+                if self.use_count_decoder:
+                    if t in pert_counts:
+                        true_counts_ = filtered_batch[f'tgt_counts_t{t}'].detach().cpu()
+                        pert_counts_ = pert_counts[t].detach().cpu()
+                        true_counts_ = true_counts_[dupl_outside_batch]
+                        pert_counts_ = pert_counts_[dupl_outside_batch]
+                        true_counts_ = true_counts_[dupl_within_batch]
+                        pert_counts_ = pert_counts_[dupl_within_batch]
+                        self.test_dict['true_counts'].append(true_counts_)
+                        self.test_dict['pert_counts'].append(pert_counts_)
+                    else:
+                        Warning(f'Counts are not available for time step: {t}')
                 # if self.gene_module_list is not None:
                 #     true_gm_embs = return_gene_embeddings(
                 #         true_gene,
@@ -680,18 +744,6 @@ class PerturberTrainer(CytoMeisterTrainer):
                         self.test_dict[var].append(var_values)
         else:
             pass
-
-    def compute_non_zero_mean(self, embs: torch.Tensor):
-        non_zero_mask = embs != 0
-        non_zero_sum = torch.sum(embs * non_zero_mask, dim=0)
-        non_zero_count = torch.sum(non_zero_mask, dim=0)
-        if torch.any(non_zero_count == 0):
-            raise ValueError(
-                'The embeddings contain positions where all values are zero.'
-            )
-        else:
-            non_zero_mean = non_zero_sum / non_zero_count
-        return non_zero_mean
 
     def on_test_epoch_end(self):
         # # compute emd of gm_embs based on condition

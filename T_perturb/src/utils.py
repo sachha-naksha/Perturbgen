@@ -102,9 +102,9 @@ def map_ensembl_to_genename(
 
 
 def condition_for_count_loss(
-    condition_keys: str,
-    conditions: dict,
-    conditions_combined: list,
+    condition_keys: str | list[str] | None,
+    conditions: dict | None,
+    conditions_combined: list | None,
     tgt_adata_tmp: ad.AnnData,
 ):
     '''
@@ -904,6 +904,16 @@ def return_perturbation_adata(
     # adata.obsm
     true_cls = torch.cat(test_dict['true_cls']).numpy()
     perturbed_cls = torch.cat(test_dict['perturbed_cls']).numpy()
+    # adata.X
+    if 'pert_counts' in test_dict.keys():
+        pert_counts = torch.cat(test_dict['pert_counts']).numpy()
+    else:
+        pert_counts = None
+    # adata.layers['counts']
+    if 'true_counts' in test_dict.keys():
+        true_counts = torch.cat(test_dict['true_counts']).numpy()
+    else:
+        true_counts = None
     # cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
     if 'mean_cosine_similarity_l1' in test_dict.keys():
@@ -958,9 +968,11 @@ def return_perturbation_adata(
     test_obs = pd.DataFrame(obs_dict)
     # create adata
     adata = ad.AnnData(
+        X=pert_counts,
         obs=test_obs,
         obsm=obsm_dict,
         var=pd.DataFrame(marker_genes.keys(), columns=['gene_name']),
+        layers={'counts': true_counts},
     )
     adata.var_names = adata.var['gene_name']
     adata.X = cos_similarity_df
@@ -1226,11 +1238,9 @@ def noise_schedule(
 
 def top_k(logits, thres=0.9):
     k = math.ceil((1 - thres) * logits.shape[-1])
-    # print('logits', logits[:5,:7, :10])
     val, ind = logits.topk(k, dim=-1)
     probs = torch.full_like(logits, float('-inf'))
     probs.scatter_(2, ind, val)
-    # print('probs', probs[:5,:7, :10])
     return probs
 
 
