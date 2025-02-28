@@ -441,6 +441,7 @@ class PerturberTrainer(CountDecoderTrainer):
                 _, count_output = self.compute_count_loss(
                     count_outputs, batch, n_samples=self.n_samples
                 )
+                print(count_output)
 
         else:
             if (perturbation is False) or (self.use_count_decoder is False):

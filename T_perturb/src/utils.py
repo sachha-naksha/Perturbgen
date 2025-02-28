@@ -886,8 +886,8 @@ def return_perturbation_adata(
     --------
     adata: `~anndata.AnnData` \n
         Annotated data matrix with predicted counts. \n
-        - adata.X: `~pd.DataFrame`
-            pd.DataFrame of cosine similarities between true and predicted embeddings.
+        - adata.X: `~numpy.ndarray`
+            Array of perturbed counts.
         - adata.obs: `~pandas.DataFrame`
             DataFrame of obs_key.
         - adata.var: `~pandas.DataFrame`
@@ -950,8 +950,10 @@ def return_perturbation_adata(
         'mean_cos_similarity_lmid': mean_cos_similarity_lmid,
         # 'delta_probs': delta_probs,
     }
+    print(cos_similarity_df.shape)
     # varm_dict = {
-    #     'gene_cos_similarity': cos_similarity_df,
+    #     'gene_cos_similarity': cos_similarity_df.T,
+    # }
     #     # 'delta_gene_probs': delta_gene_probs_df.T,
     # }
 
@@ -966,16 +968,19 @@ def return_perturbation_adata(
     # adata.obs
     obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
     test_obs = pd.DataFrame(obs_dict)
+    print(pert_counts)
+    print(pert_counts.shape)
+    print('cos_similiarity_df', cos_similarity_df)
     # create adata
     adata = ad.AnnData(
         X=pert_counts,
         obs=test_obs,
         obsm=obsm_dict,
-        var=pd.DataFrame(marker_genes.keys(), columns=['gene_name']),
+        var=cos_similarity_df.T,
+        # varm=varm_dict,
         layers={'counts': true_counts},
     )
-    adata.var_names = adata.var['gene_name']
-    adata.X = cos_similarity_df
+    adata.var_names = cos_similarity_df.columns
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
     return adata
