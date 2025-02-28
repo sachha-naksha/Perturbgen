@@ -950,10 +950,9 @@ def return_perturbation_adata(
         'mean_cos_similarity_lmid': mean_cos_similarity_lmid,
         # 'delta_probs': delta_probs,
     }
-    print(cos_similarity_df.shape)
-    # varm_dict = {
-    #     'gene_cos_similarity': cos_similarity_df.T,
-    # }
+    varm_dict = {
+        'gene_cos_similarity': cos_similarity_df.T,
+    }
     #     # 'delta_gene_probs': delta_gene_probs_df.T,
     # }
 
@@ -968,16 +967,12 @@ def return_perturbation_adata(
     # adata.obs
     obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
     test_obs = pd.DataFrame(obs_dict)
-    print(pert_counts)
-    print(pert_counts.shape)
-    print('cos_similiarity_df', cos_similarity_df)
     # create adata
     adata = ad.AnnData(
         X=pert_counts,
         obs=test_obs,
         obsm=obsm_dict,
-        var=cos_similarity_df.T,
-        # varm=varm_dict,
+        varm=varm_dict,
         layers={'counts': true_counts},
     )
     adata.var_names = cos_similarity_df.columns
