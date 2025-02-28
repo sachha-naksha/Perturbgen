@@ -8,15 +8,15 @@ from datetime import datetime
 import pytorch_lightning as pl
 import scanpy as sc
 import torch
-from datasets import load_from_disk
+from datasets import concatenate_datasets, load_from_disk
 
 # from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy  # ,DeepSpeedStrategy
 
-from T_perturb.Dataloaders.datamodule import CellGenDataModule
-from T_perturb.Model.trainer import CellGenTrainer, CountDecoderTrainer
+from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
+from T_perturb.Model.trainer import CountDecoderTrainer, CytoMeisterTrainer
 from T_perturb.src.utils import (
     condition_for_count_loss,
     randomised_split,
@@ -70,8 +70,8 @@ def get_args():
         '--split_obs',
         type=str,
         nargs='+',
-        # default=['Donor', 'Cell_type'],
-        default=['celltype_v2'],
+        default=['Donor', 'Cell_type'],
+        # default=['celltype_v2'],
     )
     parser.add_argument('--split_value', type=str, default='D351')
     parser.add_argument(
@@ -127,6 +127,11 @@ def get_args():
         default='./T_perturb/T_perturb/pp/res/cytoimmgen/token_id_to_genename_hvg.pkl',
     )
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
+    parser.add_argument('--num_node', type=int, default=1)
+    parser.add_argument('--use_positional_encoding', type=str2bool, default=False)
+    parser.add_argument('--layer_norm', type=str2bool, default=False)
+    parser.add_argument('--add_cell_time', type=str2bool, default=False)
+
     parser.add_argument('--shuffle', type=str2bool, default=True, help='shuffle')
     parser.add_argument(
         '--epochs', type=int, default=100, help='number of training epochs'
@@ -153,7 +158,7 @@ def get_args():
     parser.add_argument(
         '--cellgen_lr', type=float, default=0.0001, help='learning rate'
     )
-    
+
     parser.add_argument('--count_lr', type=float, default=0.00005, help='learning rate')
     parser.add_argument('--cellgen_wd', type=float, default=0.0001, help='weight decay')
     parser.add_argument('--count_wd', type=float, default=0.01, help='weight decay')
@@ -182,7 +187,7 @@ def get_args():
     parser.add_argument(
         '--mask_scheduler',
         type=str,
-        default='pow',
+        default='cosine',
         help='mask scheduler [cosine, exp, pow]',
     )
     parser.add_argument('--temperature', type=float, default=1.5, help='temperature')
@@ -195,7 +200,7 @@ def get_args():
         '--pred_tps',
         nargs='+',
         type=int,
-        default=[1, 2, 3],
+        default=[1, 2, 3, 4],
         help='time steps which are predicted',
     )
     parser.add_argument(
@@ -211,9 +216,15 @@ def get_args():
         nargs='+',
         type=str,
         # default=['Time_point'],
-        # default=['Cell_population', 'Cell_type', 'Time_point', 'Donor'],
-        default=['celltype_v2', 'sex', 'phase', 'tissue', 'diff_state'],
+        default=['Cell_population', 'Cell_type', 'Time_point', 'Donor'],
+        # default=['celltype_v2', 'sex', 'phase', 'tissue', 'diff_state'],
         help='List of variables to keep in the dataset',
+    )
+    parser.add_argument(
+        '--cond_list',
+        nargs='+',
+        type=str,
+        help='List of variables to form condition tokens',
     )
     parser.add_argument(
         '--train_prop',
@@ -233,7 +244,14 @@ def get_args():
             'GF_fine_tuned',
             'GF_frozen',
             'Transformer_encoder',
+            'scmaskgit',
         ],
+        help='mode of encoder',
+    )
+    parser.add_argument(
+        '--encoder_path',
+        default=None,
+        type=str,
         help='mode of encoder',
     )
     parser.add_argument(
@@ -254,6 +272,24 @@ def get_args():
         type=str2bool,
         default=True,
         help='context mode for timepoints',
+    )
+    parser.add_argument(
+        '--d_condc',
+        type=int,
+        default=1,
+        help='One Hot dimension',
+    )
+    parser.add_argument(
+        '--d_condt',
+        type=int,
+        default=768,
+        help='One Hot dimension',
+    )
+    parser.add_argument(
+        '--d_model',
+        type=int,
+        default=512,
+        help='embedding dimension',
     )
     args = parser.parse_args()
     return args
@@ -312,7 +348,6 @@ def main() -> None:
             f'Number of samples in val set: {len(val_indices)}\n'
             f'Number of samples in test set: {len(test_indices)}'
         )
-        raise
     else:
         # return all the indices
         train_indices = list(range(len(src_dataset)))
@@ -320,16 +355,18 @@ def main() -> None:
         test_indices = list(
             range(len(tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}']))
         )
-    # check if the train indices are the same for both adata and dataset
-    subset_adata = tgt_adata_tmp[train_indices]
+    # # check if the train indices are the same for both adata and dataset
+    # subset_adata = tgt_adata_tmp[train_indices]
 
-    subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
-        train_indices
-    )
-    assert (
-        subset_adata.obs['cell_pairing_index'].tolist()
-        == subset_dataset['cell_pairing_index']
-    )
+    # subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
+    #     train_indices
+    # )
+    # adata_idx = subset_adata.obs['index'].tolist()
+    # dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
+
+    # assert adata_idx == dataset_idx, (
+    #     'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
+    # )
     if args.loss_mode == 'mse':
         # log normalize data only for mse loss
         sc.pp.normalize_total(src_adata, target_sum=1e4)
@@ -354,16 +391,33 @@ def main() -> None:
             args.conditions_combined,
             tgt_adata_tmp,
         )
-
-    print('Data loaded and preprocessed.')
     # count number of unique timepoints
     n_total_tps = len(tgt_adatas)
+
+    # create dictionnary of metadata for classifier-free guidance
+    token_no = args.tgt_vocab_size
+
+    # create full dataset to extract metadata for conditioning
+    dataset_list = [src_dataset]
+    for dataset in tgt_datasets.values():
+        dataset_list.append(dataset)
+    full_dataset = concatenate_datasets(dataset_list)
+    if args.cond_list is not None:
+        condition_dict = {}
+        for condition in args.cond_list:
+            condition_dict[condition] = {
+                cell_type: i + token_no
+                for i, cell_type in enumerate(full_dataset.unique(condition))
+            }
+            token_no += len(condition_dict[condition])
+    else:
+        condition_dict = None
 
     # Initialize model module
     # ----------------------------------------------------------------------------------
     trainer_kwargs = {
-        'tgt_vocab_size': args.tgt_vocab_size,
-        'd_model': 512,
+        'tgt_vocab_size': token_no + 50,  # add 50 for extra tokens
+        'd_model': args.d_model,
         'num_heads': 8,
         'num_layers': args.num_layers,
         'd_ff': args.d_ff,
@@ -374,20 +428,29 @@ def main() -> None:
         'n_total_tps': n_total_tps,
         'encoder': args.encoder,
         'output_dir': args.output_dir,
-        'context_mode': args.context_mode,
         'pos_encoding_mode': args.pos_encoding_mode,
+        'encoder_path': args.encoder_path,
+        'condition_dict': condition_dict,
+        'temperature': args.temperature,
+        'iterations': args.iterations,
+        'mapping_dict_path': args.mapping_dict_path,
     }
     if args.train_mode == 'masking':
         trainer_kwargs['dropout'] = args.cellgen_dropout
         trainer_kwargs['mlm_probability'] = args.mlm_prob
         trainer_kwargs['end_lr'] = args.cellgen_lr
         trainer_kwargs['weight_decay'] = args.cellgen_wd
-        trainer_kwargs['mapping_dict_path'] = args.mapping_dict_path
-        pretrained_module = CellGenTrainer(**trainer_kwargs)
+        trainer_kwargs['context_mode'] = args.context_mode
+        pretrained_module = CytoMeisterTrainer(**trainer_kwargs)
     elif args.train_mode == 'count':
         trainer_kwargs['ckpt_masking_path'] = args.ckpt_masking_path
         trainer_kwargs['ckpt_count_path'] = None
         trainer_kwargs['loss_mode'] = args.loss_mode
+        trainer_kwargs['d_condc'] = args.d_condc
+        trainer_kwargs['d_condt'] = args.d_condt
+        trainer_kwargs['layer_norm'] = args.layer_norm
+        trainer_kwargs['use_positional_encoding'] = args.use_positional_encoding
+        trainer_kwargs['add_cell_time'] = args.add_cell_time
         trainer_kwargs['lr'] = args.count_lr
         trainer_kwargs['weight_decay'] = args.count_wd
         trainer_kwargs['conditions'] = conditions_
@@ -395,8 +458,10 @@ def main() -> None:
         trainer_kwargs['tgt_adata'] = tgt_adatas
         trainer_kwargs['temperature'] = args.temperature
         trainer_kwargs['iterations'] = args.iterations
-        trainer_kwargs['seed'] = args.seed
         trainer_kwargs['n_genes'] = src_adata.shape[1]
+        trainer_kwargs['dropout'] = args.count_dropout
+        # trainer_kwargs['use_positional_encoding'] = args.use_positional_encoding
+        trainer_kwargs['seed'] = args.seed
         decoder_module = CountDecoderTrainer(**trainer_kwargs)
     else:
         raise ValueError('train_mode not recognised, needs to be masking or count')
@@ -432,7 +497,7 @@ def main() -> None:
     }
     if args.train_mode == 'masking':
         # TODO: Do not pass src into DataModule
-        data_module = CellGenDataModule(**data_module_kwargs)
+        data_module = CytoMeisterDataModule(**data_module_kwargs)
 
     elif args.train_mode == 'count':
         data_module_kwargs['src_counts'] = src_counts
@@ -441,7 +506,7 @@ def main() -> None:
         data_module_kwargs['condition_encodings'] = condition_encodings
         data_module_kwargs['conditions'] = conditions
         data_module_kwargs['conditions_combined'] = conditions_combined
-        data_module = CellGenDataModule(**data_module_kwargs)
+        data_module = CytoMeisterDataModule(**data_module_kwargs)
     # Setup trainer
     # ----------------------------------------------------------------------------------
     run_id = datetime.now().strftime('%Y%m%d_%H%M_cellgen')
@@ -460,7 +525,7 @@ def main() -> None:
             f'p{args.pos_encoding_mode}_m_{args.mask_scheduler}'
             f'_tp_{time_steps_str}_s_{args.seed}'
         )
-        if val_indices:
+        if val_indices is not None:
             monitor_metric = 'val/perplexity'
         else:
             monitor_metric = 'train/perplexity'
@@ -495,7 +560,7 @@ def main() -> None:
         f'{run_id}_{str(uuid.uuid4())[:6]}' if torch.cuda.device_count() > 1 else run_id
     )
     wandb_logger = WandbLogger(
-        project='ttransformer', name=run_name, save_dir=args.log_dir, log_model=True
+        project='ttransformer', name=run_name, save_dir=args.log_dir, log_model=False
     )
 
     # In this simple example we just check if a GPU is available.
@@ -529,7 +594,7 @@ def main() -> None:
     #     precision = 'bf16-mixed'
     # else:
     #     precision = '16-mixed'
-    # After each epoch, convert DeepSpeed checkpoint to FP32 and save
+    # # After each epoch, convert DeepSpeed checkpoint to FP32 and save
     # class DeepSpeedCheckpointConverter(Callback):
     #     def __init__(self, checkpoint_path, filename, save_interval=5):
     #         super().__init__()
@@ -575,7 +640,8 @@ def main() -> None:
     #     checkpoint_path=checkpoint_path, filename=filename
     # )
     # If the device is an A100, set the precision for matrix multiplication
-    ddp_strategy = DDPStrategy(find_unused_parameters=True)
+    ddp_strategy = DDPStrategy(find_unused_parameters=False)
+
     trainer = pl.Trainer(
         logger=wandb_logger,
         callbacks=[
@@ -583,13 +649,15 @@ def main() -> None:
             early_stop_callback,
             checkpoint_callback,
         ],
+        # accumulate_grad_batches=10,
         max_epochs=args.epochs,
         accelerator=accelerator,
-        # precision=16,
+        # precision=precision,
+        # gradient_clip_val=1.0,
         devices=-1 if torch.cuda.is_available() else 0,
+        num_nodes=args.num_node,
         strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
     )
-    print('Starting training...')
 
     if args.train_mode == 'masking':
         # Finally, kick of the training process.

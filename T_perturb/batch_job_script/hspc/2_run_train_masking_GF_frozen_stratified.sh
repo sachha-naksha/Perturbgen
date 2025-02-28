@@ -4,11 +4,11 @@
 #BSUB -n 16 # number of cores
 #BSUB -G teamtrynka # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
-#BSUB -o logs/hspc_masking_%J.out # output file
-#BSUB -e logs/hspc_masking_%J.err # error file
+#BSUB -o logs/hspc_masking_stratified_%J.out # output file
+#BSUB -e logs/hspc_masking_stratified_%J.err # error file
 #BSUB -M 20000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>20000] rusage[mem=20000]' # RAM memory part 1. Default: 100MB
-#BSUB -J hspc_masking # job name
+#BSUB -J hspc_masking_stratified # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -38,9 +38,11 @@ mkdir -p $RES_DIR/$RES_NAME
 # python3 $cwd/train.py \
 python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/train.py \
 --train_mode masking \
---split False \
+--split True \
 --splitting_mode stratified \
---split_obs celltype_v2 \
+--train_prop 0.8 \
+--test_prop 0.2 \
+--split_obs celltype_v2 tissue \
 --output_dir $RES_DIR/$RES_NAME/ \
 --src_dataset "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_src/stem.dataset" \
 --tgt_dataset_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt" \

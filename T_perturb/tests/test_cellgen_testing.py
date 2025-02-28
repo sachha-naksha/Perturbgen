@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 import scanpy as sc
 import torch
 
-from T_perturb.Dataloaders.datamodule import CellGenDataModule
+from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
 from T_perturb.Model.trainer import CountDecoderTrainer
 from T_perturb.src.utils import label_encoder
 from T_perturb.tests.test_cellgen_training import dummy_dataset
@@ -18,9 +18,9 @@ if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
 
 
-class CellGenTestGenerationCase(unittest.TestCase):
+class CytoMeisterTestGenerationCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
-        super(CellGenTestGenerationCase, self).__init__(*args, **kwargs)
+        super(CytoMeisterTestGenerationCase, self).__init__(*args, **kwargs)
         self.pred_tps = [1, 2]
         self.context_tps = [1, 2]
         self.n_total_tps = 2
@@ -129,10 +129,14 @@ class CellGenTestGenerationCase(unittest.TestCase):
             conditions_combined = torch.tensor(conditions_combined, dtype=torch.long)
 
         decoder_module = CountDecoderTrainer(
-            ckpt_masking_path='./T_perturb/T_perturb/tests/'
-            'checkpoints/baseline_masking_checkpoint-epoch=00.ckpt',
-            ckpt_count_path='./T_perturb/T_perturb/tests/'
-            'checkpoints/baseline_counts_checkpoint-epoch=00.ckpt',
+            ckpt_masking_path=(
+                'T_perturb/T_perturb/tests/checkpoints/'
+                'test_masking_checkpoint-epoch=00.ckpt'
+            ),
+            ckpt_count_path=(
+                'T_perturb/T_perturb/tests/checkpoints/'
+                'test_counts_checkpoint-epoch=00.ckpt'
+            ),
             tgt_vocab_size=self.tgt_vocab_size,
             d_model=self.d_model,
             num_heads=4,
@@ -164,7 +168,7 @@ class CellGenTestGenerationCase(unittest.TestCase):
         )
         self.decoder_module = decoder_module
 
-        self.data_module = CellGenDataModule(
+        self.data_module = CytoMeisterDataModule(
             src_counts=src_counts,
             tgt_counts_dict=tgt_counts_dict,
             src_dataset=src_dataset,

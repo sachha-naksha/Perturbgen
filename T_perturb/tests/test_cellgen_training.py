@@ -9,8 +9,8 @@ from datasets import Dataset
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 
-from T_perturb.Dataloaders.datamodule import CellGenDataModule
-from T_perturb.Model.trainer import CellGenTrainer
+from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
+from T_perturb.Model.trainer import CytoMeisterTrainer
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
@@ -29,18 +29,20 @@ def dummy_dataset(
         # Generate unique indices for each sample using NumPy
         input_ids_np = np.array(
             [
-                np.random.choice(vocab_size, max_len, replace=False)
+                np.random.choice(np.arange(2, vocab_size), max_len, replace=False)
                 for _ in range(num_samples)
             ]
         )
         input_ids = torch.tensor(input_ids_np, dtype=torch.long)
         input_ids[:, -10:] = 0
         cell_idx = np.arange(num_samples)
+        cell_type = np.random.choice(['A', 'B', 'C'], num_samples)
         dataset = Dataset.from_dict(
             {
                 'input_ids': input_ids,
+                'cell_type': cell_type,
                 'length': [len(input_ids)] * num_samples,
-                'cell_pairin_index': cell_idx,
+                'cell_pairing_index': cell_idx,
             }
         )
         return dataset
@@ -49,7 +51,7 @@ def dummy_dataset(
         for t in range(total_time_steps):
             input_ids_np = np.array(
                 [
-                    np.random.choice(vocab_size, max_len, replace=False)
+                    np.random.choice(np.arange(2, vocab_size), max_len, replace=False)
                     for _ in range(num_samples)
                 ]
             )
@@ -58,6 +60,7 @@ def dummy_dataset(
             tgt_dataset_dict[f'tgt_dataset_t{t+1}'] = Dataset.from_dict(
                 {
                     'input_ids': input_ids,
+                    'cell_type': np.random.choice(['A', 'B', 'C'], num_samples),
                     'length': [len(input_ids)] * num_samples,
                     'cell_pairing_index': np.random.choice(
                         100, num_samples, replace=False
@@ -67,15 +70,15 @@ def dummy_dataset(
         return tgt_dataset_dict
 
 
-class CellGenTestTrainingCase(unittest.TestCase):
+class CytoMeisterTestTrainingCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
-        super(CellGenTestTrainingCase, self).__init__(*args, **kwargs)
+        super(CytoMeisterTestTrainingCase, self).__init__(*args, **kwargs)
         self.pred_tps = [1, 2]
         self.n_total_tps = 2
         self.max_seq_length = 50
         self.tgt_vocab_size = 101  # +1 for padding token
         self.batch_size = 4
-        self.d_model = 12
+        self.d_model = 768
 
     def setUp(self):
         # Reproducibility
@@ -84,7 +87,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
         torch.backends.cudnn.benchmark = False
 
         # Load transformer model and count decoder
-        transformer = CellGenTrainer(
+        transformer = CytoMeisterTrainer(
             tgt_vocab_size=self.tgt_vocab_size,
             d_model=self.d_model,
             num_heads=4,
@@ -99,7 +102,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
             pred_tps=self.pred_tps,
             n_total_tps=self.n_total_tps,
             pos_encoding_mode='time_pos_sin',
-            encoder='Transformer_encoder',
+            encoder='scmaskgit',
             mapping_dict_path=(
                 './T_perturb/T_perturb/pp/res/'
                 'cytoimmgen/token_id_to_genename_hvg.pkl'
@@ -121,7 +124,7 @@ class CellGenTestTrainingCase(unittest.TestCase):
         )
 
         # Load the data module
-        self.data_module = CellGenDataModule(
+        self.data_module = CytoMeisterDataModule(
             src_dataset=src_dataset,
             tgt_datasets=tgt_datasets,
             batch_size=self.batch_size,
@@ -146,10 +149,11 @@ class CellGenTestTrainingCase(unittest.TestCase):
     def test_transformer_forward(self):
         # Test forward pass
         batch = next(iter(self.data_module.train_dataloader()))
-        output = self.transformer(batch)
+        output, _ = self.transformer(batch)
         print('batch completed')
+        t = list(output.keys())[0]
         self.assertEqual(
-            output['dec_embedding'].shape,
+            output[t]['dec_embedding'].shape,
             (
                 self.batch_size,
                 self.max_seq_length + 1,  # +1 for cls token

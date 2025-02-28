@@ -2,22 +2,23 @@
 
 import argparse
 import os
-import re
 import uuid
+import warnings
 from datetime import datetime
 
-import pandas as pd
 import pytorch_lightning as pl
 import scanpy as sc
 import torch
-from datasets import load_from_disk
+from datasets import concatenate_datasets, load_from_disk
 from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.strategies import DDPStrategy  # DeepSpeedStrategy
 
-from T_perturb.Dataloaders.datamodule import CellGenDataModule
-from T_perturb.Model.trainer import CellGenTrainer, CountDecoderTrainer
+from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
+from T_perturb.Model.trainer import CountDecoderTrainer, CytoMeisterTrainer
 from T_perturb.src.utils import (
     condition_for_count_loss,
+    get_idx_for_filtering,
     randomised_split,
     read_dataset_files,
     str2bool,
@@ -28,8 +29,6 @@ if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
     os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative')
     print('Changed working directory to root of repository')
-
-print(os.getcwd())
 
 
 def get_args():
@@ -72,8 +71,30 @@ def get_args():
         type=float,
         default=0.1,
     )
-    parser.add_argument('--split_obs', type=str, default='Donor')
+    parser.add_argument(
+        '--split_obs',
+        type=str,
+        nargs='+',
+        default=None,
+        # default=['celltype_v2'],
+    )
     parser.add_argument('--split_value', type=str, default='D351')
+    parser.add_argument('--use_positional_encoding', type=str2bool, default=False)
+    parser.add_argument('--layer_norm', type=str2bool, default=False)
+    parser.add_argument('--add_cell_time', type=str2bool, default=False)
+
+    parser.add_argument(
+        '--d_condc',
+        type=int,
+        default=None,
+        help='One Hot dimension',
+    )
+    parser.add_argument(
+        '--d_condt',
+        type=int,
+        default=768,
+        help='One Hot dimension',
+    )
     parser.add_argument(
         '--generate',
         type=str2bool,
@@ -148,6 +169,7 @@ def get_args():
     )
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
     parser.add_argument('--shuffle', type=bool, default=False, help='shuffle')
+    parser.add_argument('--num_node', type=int, default=1)
     parser.add_argument(
         '--log_dir', type=str, default='logs', help='path to data directory'
     )
@@ -197,7 +219,7 @@ def get_args():
         default='cosine',
         help='mask scheduler [cosine, exp, pow]',
     )
-    parser.add_argument('--temperature', type=float, default=1.0, help='temperature')
+    parser.add_argument('--temperature', type=float, default=0.5, help='temperature')
     parser.add_argument('--sequence_length', type=int, default=150, help='iterations')
     parser.add_argument('--iterations', type=int, default=20, help='iterations')
     parser.add_argument('--conditions', type=dict, default=None, help='conditions')
@@ -227,6 +249,12 @@ def get_args():
         help='List of variables to keep in the dataset',
     )
     parser.add_argument(
+        '--cond_list',
+        nargs='+',
+        type=str,
+        help='List of variables to form condition tokens',
+    )
+    parser.add_argument(
         '--encoder',
         default='GF_frozen',
         type=str,
@@ -234,8 +262,21 @@ def get_args():
             'GF_fine_tuned',
             'GF_frozen',
             'Transformer_encoder',
+            'scmaskgit',
         ],
         help='mode of encoder',
+    )
+    parser.add_argument(
+        '--encoder_path',
+        type=str,
+        default=None,
+        help='path to pre-trained encoder',
+    )
+    parser.add_argument(
+        '--tokenid_to_rowid_path',
+        type=str,
+        default=None,
+        help='path to tokenid to rowid mapping file',
     )
     parser.add_argument(
         '--seed',
@@ -256,14 +297,46 @@ def get_args():
         help='positional encoding',
     )
     parser.add_argument(
-        '--guided_gene_list_dir',
-        type=str,
-        default=None,
+        '--d_model',
+        type=int,
+        default=512,
+        help='embedding dimension',
     )
     parser.add_argument(
-        '--generate_cell_type',
+        '--deg_pkl_path',
         type=str,
         default=None,
+        help='path to deg pkl file',
+    )
+    parser.add_argument(
+        '--return_gene_embs',
+        type=str2bool,
+        default=False,
+        help='return gene embeddings',
+    )
+    parser.add_argument(
+        '--gene_embs_condition',
+        type=str,
+        default=None,
+        help='aggregate gene embeddings over condition',
+    )
+    parser.add_argument(
+        '--filter_cond',
+        type=str,
+        nargs='+',
+        default=None,
+        help='condition to filter tgt datasets',
+    )
+    parser.add_argument(
+        '--filter_var',
+        type=str,
+        default=None,
+        help='covariate to filter tgt datasets',
+    )
+    parser.add_argument(
+        '--n_samples',
+        type=int,
+        default=3,
     )
     args = parser.parse_args()
     return args
@@ -290,96 +363,124 @@ def main() -> None:
     src_dataset = load_from_disk(args.src_dataset)
     src_adata = sc.read_h5ad(args.src_adata)
 
-    # filter for cell type of interest
-    if args.generate_cell_type:
-        tp_cell_type = []
-        pairing_index_list = []
-        pattern = r'tgt_h5ad_t(\d+)'
-        for file_name, tgt_adata in tgt_adatas.items():
-            if args.guided_gene_list_dir:
-                tp_cell_type.extend(
-                    tgt_adatas[file_name].obs['Cell_population'].unique().tolist()
-                )
-            # add row index to filter src
-            tgt_adata.obs['index'] = range(len(tgt_adata))
-            # only select specific timepoints
-            cell_type_mask = tgt_adata.obs['Cell_population'] == args.generate_cell_type
-            if sum(cell_type_mask) == 0:
-                pass
-            else:
-                cell_type_idx = tgt_adata.obs['cell_pairing_index'][cell_type_mask]
-                cell_type_idx = cell_type_idx.tolist()
-                pairing_index = tgt_adata[cell_type_mask].obs['index'].tolist()
+    if args.loss_mode == 'mse':
+        # log normalize data only for mse loss
+        sc.pp.normalize_total(src_adata, target_sum=1e4)
+        sc.pp.log1p(src_adata)
+        for _, tgt_adata in tgt_adatas.items():
+            sc.pp.normalize_total(tgt_adata, target_sum=1e4)
+            sc.pp.log1p(tgt_adata)
 
-                pairing_index_list.extend(pairing_index)
-                tgt_adatas[file_name].obs.drop('index', axis=1, inplace=True)
-
-        if len(pairing_index) > 0:
-            src_adata = src_adata[pairing_index]
-            src_dataset = src_dataset.select(pairing_index)
-            for file_name, tgt_adata in tgt_adatas.items():
-                re_file_name = re.search(pattern, file_name)
-                if re_file_name:
-                    time_step = int(re_file_name.group(1))
-                    tgt_datasets[f'tgt_dataset_t{time_step}'] = tgt_datasets[
-                        f'tgt_dataset_t{time_step}'
-                    ].select(pairing_index)
-                    tgt_adatas[file_name] = tgt_adata[pairing_index]
-    # create gene list for guided generation
-    if args.guided_gene_list_dir:
-        guided_gene_df = pd.read_csv(args.guided_gene_list_dir)
-        # only select cell type of selected timepoint
-        guided_gene_df = guided_gene_df[
-            guided_gene_df['cell_population'].isin(tp_cell_type)
-        ]
-        # select unique genes with value counts for cell_population ==1
-        unique_genes = (
-            guided_gene_df['gene_id']
-            .value_counts()[guided_gene_df['gene_id'].value_counts() == 1]
-            .index
-        )
-        cell_type_df = guided_gene_df[
-            guided_gene_df['cell_population'] == args.generate_cell_type
-        ]
-        # find intersect between unique genes and cell type genes
-        unique_genes_df = cell_type_df[
-            cell_type_df['gene_id'].isin(unique_genes)
-        ].copy()
-        unique_genes_df['unique'] = True
-        if unique_genes_df.shape[0] == 0:
-            raise ValueError(
-                f'No unique genes found in guided '
-                f'gene list for {args.generate_cell_type}'
-            )
-        unique_token_dict = {
-            k: v
-            for k, v in zip(unique_genes_df['gene_name'], unique_genes_df['token_id'])
-        }
-        # find shared genes in the guided gene list
-        shared_genes = cell_type_df[~cell_type_df['gene_id'].isin(unique_genes)][
-            'gene_id'
-        ]
-        # sample 25 genes from the shared gene list
-        # if len(shared_genes) > 25:
-        #     shared_genes = shared_genes.sample(50)
-        # else:
-        #     shared_genes = shared_genes
-        shared_genes_df = cell_type_df[cell_type_df['gene_id'].isin(shared_genes)]
-        shared_token_dict = {
-            k: v
-            for k, v in zip(shared_genes_df['gene_name'], shared_genes_df['token_id'])
-        }
-        print(
-            f'Guided gene list created with {len(unique_token_dict)} genes'
-            f' and {len(shared_token_dict)} shared genes'
-        )
+    # Classifier-free guidance pre-processing
+    # ---------------------------------------
+    # create dictionnary of metadata for classifier-free guidance
+    # needs to be completed before any filtering to initialize
+    # all condition tokens
+    token_no = args.tgt_vocab_size
+    if args.cond_list is not None:
+        full_dataset = concatenate_datasets([src_dataset] + list(tgt_datasets.values()))
+        condition_dict = {}
+        for condition in args.cond_list:
+            condition_dict[condition] = {
+                cell_type: i + token_no
+                for i, cell_type in enumerate(full_dataset.unique(condition))
+            }
+            token_no += len(condition_dict[condition])
     else:
-        unique_token_dict = None
-        shared_token_dict = None
+        condition_dict = None
+
+    # 1. Filter datasets based on condition, if available
+    # 2. Extract condition to return gene embeddings
+    # ---------------------------------------------------
+
+    # create full dataset to extract metadata for conditioning
+    filter_idx = []
+    # filter dataset based on condition
+    if (args.filter_var is not None) and (args.filter_cond is not None):
+        for dataset in tgt_datasets.values():
+            idx_ = get_idx_for_filtering(
+                dataset,
+                args.filter_cond,
+                args.filter_var,
+            )
+            # if len(filter_idx) == 0:
+            #     filtered_dataset = None
+            # else:
+            #     filtered_dataset = dataset.select(idx_)
+            filter_idx.extend(idx_)
+
+    if len(filter_idx) > 0:
+        # apply condition filter to all datasets
+        filter_idx = list(set(filter_idx))
+        for i in range(len(tgt_datasets)):
+            t = i + 1
+            tgt_dataset = tgt_datasets[f'tgt_dataset_t{t}']
+            tgt_adata = tgt_adatas[f'tgt_h5ad_t{t}']
+            tgt_dataset = tgt_dataset.select(filter_idx)
+            tgt_datasets[f'tgt_dataset_t{t}'] = tgt_dataset
+            tgt_adata = tgt_adata[filter_idx, :]
+            tgt_adatas[f'tgt_h5ad_t{t}'] = tgt_adata
+        # for i, dataset in tgt_datasets.items():
+        #     tgt_datasets[i] = dataset.select(filter_idx)
+        src_dataset = src_dataset.select(filter_idx)
+        src_adata = src_adata[filter_idx, :]
+        if args.gene_embs_condition is not None:
+            # filter for keys which are in pred_tps
+            pred_dataset = {
+                key: tgt_datasets[key]
+                for key in tgt_datasets
+                if key in {f'tgt_dataset_t{tp}' for tp in args.pred_tps}
+            }
+            all_pred_dataset = concatenate_datasets(list(pred_dataset.values()))
+            # check if filter_cond is the same as all_pred_dataset
+            all_pred_condition = all_pred_dataset.unique(args.filter_var)
+            if all_pred_condition != args.filter_cond:
+                warnings.warn(
+                    f'Filtering gene embs for {all_pred_condition} '
+                    f'instead of only {args.filter_cond} '
+                    f'if this is not the intended behaviour, please select the '
+                    f'corresponding pred_tps for the gene embs condition '
+                )
+            gene_embs_list = all_pred_dataset.unique(args.gene_embs_condition)
+            print(
+                f'Return gene embs for {gene_embs_list} '
+                f'in condition {args.gene_embs_condition} '
+                f'filtered for {all_pred_condition}.'
+            )
+        else:
+            gene_embs_list = None
+    else:
+        if args.gene_embs_condition is not None:
+            full_tgt_dataset = concatenate_datasets(list(tgt_datasets.values()))
+            gene_embs_list = full_tgt_dataset.unique(args.gene_embs_condition)
+            print(
+                f'Return gene embs for {gene_embs_list} '
+                f'in {args.gene_embs_condition}.'
+            )
+        else:
+            gene_embs_list = None
 
     # use the tmp adata for all operation
     # where the metadata and information is shared across timepoints
     tgt_adata_tmp = tgt_adatas[f'tgt_h5ad_t{args.pred_tps[0]}'].copy()
+
+    # ZINB and NB count loss preprocessing
+    # ------------------------------------
+
+    (
+        conditions,
+        condition_encodings,
+        conditions_combined,
+        conditions_,
+        condition_keys_,
+        conditions_combined_,
+    ) = condition_for_count_loss(
+        args.condition_keys, args.conditions, args.conditions_combined, tgt_adata_tmp
+    )
+
+    print('Data loaded and preprocessed.')
+    # Preparing train-test split
+    # --------------------------
     if args.split:
         if args.splitting_mode == 'stratified':
             # start preprocessing to avoid loading anndata into datamodule
@@ -387,7 +488,7 @@ def main() -> None:
                 tgt_adata=tgt_adata_tmp,
                 train_prop=args.train_prop,  # 0.8,0.1,0.1 train, val, test
                 test_prop=args.test_prop,
-                groups=['Cell_type', 'Donor'],
+                groups=args.split_obs,
                 seed=args.seed,
             )
 
@@ -426,41 +527,18 @@ def main() -> None:
     subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
         train_indices
     )
-    assert (
-        subset_adata.obs['cell_pairing_index'].tolist()
-        == subset_dataset['cell_pairing_index']
+    adata_idx = subset_adata.obs['index'].tolist()
+    dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
+    assert adata_idx == dataset_idx, (
+        'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
     )
-
-    if args.loss_mode == 'mse':
-        # log normalize data only for mse loss
-        sc.pp.normalize_total(src_adata, target_sum=1e4)
-        sc.pp.log1p(src_adata)
-        for _, tgt_adata in tgt_adatas.items():
-            sc.pp.normalize_total(tgt_adata, target_sum=1e4)
-            sc.pp.log1p(tgt_adata)
-
-    # ZINB and NB count loss preprocessing
-    # ----------------------------------------------------------------------------------
-
-    (
-        conditions,
-        condition_encodings,
-        conditions_combined,
-        conditions_,
-        condition_keys_,
-        conditions_combined_,
-    ) = condition_for_count_loss(
-        args.condition_keys, args.conditions, args.conditions_combined, tgt_adata_tmp
-    )
-    print('Data loaded and preprocessed.')
     # count number of unique timepoints
     n_total_tps = len(tgt_adatas)
-
     # Initialize model module
     # ----------------------------------------------------------------------------------
     test_kwargs = {
-        'tgt_vocab_size': args.tgt_vocab_size,
-        'd_model': 512,
+        'tgt_vocab_size': token_no + 50,  # add 50 for extra tokens
+        'd_model': args.d_model,
         'num_heads': 8,
         'num_layers': args.num_layers,
         'd_ff': args.d_ff,
@@ -474,36 +552,46 @@ def main() -> None:
         'pos_encoding_mode': args.pos_encoding_mode,
         'output_dir': args.output_dir,
         'encoder': args.encoder,
-        'context_mode': args.context_mode,
         'var_list': args.var_list,
+        'encoder_path': args.encoder_path,
+        'condition_dict': condition_dict,
+        'temperature': args.temperature,
+        'iterations': args.iterations,
+        'sequence_length': args.sequence_length,
+        'mapping_dict_path': args.mapping_dict_path,
     }
     if args.test_mode == 'masking':
         test_kwargs['weight_decay'] = args.cellgen_wd
         test_kwargs['end_lr'] = args.cellgen_lr
         test_kwargs['return_embeddings'] = args.return_embeddings
-        test_kwargs['mapping_dict_path'] = args.mapping_dict_path
+        test_kwargs['return_gene_embs'] = args.return_gene_embs
         test_kwargs['gene_names'] = tgt_adata_tmp.var['gene_name']
+        test_kwargs['context_mode'] = args.context_mode
         test_kwargs['return_attn'] = args.return_attn
-        pretrained_module = CellGenTrainer(**test_kwargs)
+        test_kwargs['tokenid_to_rowid_path'] = args.tokenid_to_rowid_path
+        test_kwargs['deg_pkl_path'] = args.deg_pkl_path
+        test_kwargs['gene_embs_list'] = gene_embs_list
+        test_kwargs['gene_embs_condition'] = args.gene_embs_condition
+        pretrained_module = CytoMeisterTrainer(**test_kwargs)
 
     elif args.test_mode == 'count':
         test_kwargs['ckpt_masking_path'] = args.ckpt_masking_path
         test_kwargs['ckpt_count_path'] = args.ckpt_count_path
         test_kwargs['loss_mode'] = args.loss_mode
+        test_kwargs['d_condc'] = args.d_condc
+        test_kwargs['d_condt'] = args.d_condt
+        test_kwargs['layer_norm'] = args.layer_norm
+        test_kwargs['dropout'] = args.count_dropout
+        test_kwargs['use_positional_encoding'] = args.use_positional_encoding
+        test_kwargs['add_cell_time'] = args.add_cell_time
         test_kwargs['weight_decay'] = args.count_wd
         test_kwargs['lr'] = args.count_lr
         test_kwargs['conditions'] = conditions_
         test_kwargs['conditions_combined'] = conditions_combined_
         test_kwargs['tgt_adata'] = tgt_adatas
-        test_kwargs['temperature'] = args.temperature
-        test_kwargs['iterations'] = args.iterations
-        test_kwargs['sequence_length'] = args.sequence_length
-        test_kwargs['tgt_adata'] = tgt_adatas
-        test_kwargs['n_samples'] = 3
+        test_kwargs['n_samples'] = args.n_samples
         test_kwargs['seed'] = args.seed
         test_kwargs['n_genes'] = src_adata.shape[1]
-        test_kwargs['unique_gene_list'] = unique_token_dict
-        test_kwargs['shared_gene_list'] = shared_token_dict
         decoder_module = CountDecoderTrainer(**test_kwargs)
     else:
         raise ValueError('test_mode not recognised, needs to be masking or count')
@@ -542,12 +630,12 @@ def main() -> None:
         'conditions_combined': conditions_combined,
     }
 
-    data_module = CellGenDataModule(
+    data_module = CytoMeisterDataModule(
         **data_module_kwargs,
     )
     # Setup trainer
     # ----------------------------------------------------------------------------------
-    run_id = datetime.now().strftime('%Y%m%d_%H%M_cellgen')
+    run_id = datetime.now().strftime('%Y%m%d_%H%M_CytoMeister')
     log_path = os.path.join(
         './T_perturb/T_perturb/wandb/wandb',
         run_id,
@@ -593,11 +681,14 @@ def main() -> None:
     #     precision = 'bf16-mixed'
     # else:
     #     precision = '16-mixed'
+    ddp_strategy = DDPStrategy(find_unused_parameters=False)
     trainer = pl.Trainer(
         logger=wandb_logger,
         callbacks=[TQDMProgressBar(refresh_rate=10)],
         accelerator=accelerator,
-        devices=1 if torch.cuda.is_available() else 0,  # inference only on one gpu
+        num_nodes=args.num_node,
+        devices=-1 if torch.cuda.is_available() else 0,  # inference only on one gpu
+        strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
     )
     # Finally, kick of the training process.
     if args.test_mode == 'masking':

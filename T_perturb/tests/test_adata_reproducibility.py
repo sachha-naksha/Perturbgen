@@ -55,13 +55,10 @@ class TestAnnDataEquality(unittest.TestCase):
     def test_anndata_identical(self):
         # Define paths to your AnnData files
         anndata_path1 = (
-            './T_perturb/T_perturb/tests/res/20241018-15:35_random_pairing_stratified'
-            '_pairing_generate_adata_t[1, 2]_Transformer_encoder_'
-            's42_lzinb_n1_ptime_pos_sin_mpow_s2048.h5ad'
+            'T_perturb/T_perturb/tests/res/20241217-16:35_prediction_embeddings.h5ad'
         )
         anndata_path2 = (
-            './T_perturb/T_perturb/tests/res/20241018-15:51_generate_adata_t[1, 2]'
-            '_Transformer_encoder_s42_lzinb_n1_ptime_pos_sin_mpow_s2048.h5ad'
+            'T_perturb/T_perturb/tests/res/20241217-16:37_prediction_embeddings.h5ad'
         )
         # Load AnnData objects
         adata1 = load_anndata(anndata_path1)

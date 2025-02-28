@@ -1,5 +1,4 @@
 import pickle
-from typing import Optional
 from warnings import warn
 
 import numpy as np
@@ -14,18 +13,18 @@ from scipy.sparse import csr_matrix
 from torch.utils.data import DataLoader, Dataset
 
 
-class CellGenDataset(Dataset):
+class CytoMeisterDataset(Dataset):
     def __init__(
         self,
         src_dataset: DatasetDict,
         tgt_datasets: DatasetDict,
         time_steps: list = [1, 2],
-        src_counts: Optional[np.ndarray] = None,
-        tgt_counts_dict: Optional[np.ndarray] = None,
-        split_indices: Optional[list] = None,
-        conditions: Optional[torch.Tensor] = None,
-        conditions_combined: Optional[torch.Tensor] = None,
-        condition_encodings: Optional[dict] = None,
+        src_counts: np.ndarray | None = None,
+        tgt_counts_dict: np.ndarray | None = None,
+        split_indices: list | None = None,
+        conditions: torch.Tensor | None = None,
+        conditions_combined: torch.Tensor | None = None,
+        condition_encodings: dict | None = None,
     ):
         super().__init__()
         self.src_dataset = src_dataset
@@ -87,7 +86,7 @@ class CellGenDataset(Dataset):
         return self.dataset_length
 
 
-class CellGenDataModule(LightningDataModule):
+class CytoMeisterDataModule(LightningDataModule):
     def __init__(
         self,
         src_dataset: DatasetDict,
@@ -99,22 +98,22 @@ class CellGenDataModule(LightningDataModule):
         split: bool = False,
         pred_tps: list = [1, 2],
         n_total_tps: int = 4,
-        src_counts: Optional[np.ndarray] = None,
-        tgt_counts_dict: Optional[np.ndarray] = None,
-        condition_keys: Optional[list] = None,
-        condition_encodings: Optional[dict] = None,
-        conditions: Optional[torch.Tensor] = None,
-        conditions_combined: Optional[torch.Tensor] = None,
-        train_indices: Optional[list[int]] = None,
-        val_indices: Optional[list[int]] = None,
-        test_indices: Optional[list[int]] = None,
-        var_list: Optional[list] = None,
-        context_tps: Optional[list] = None,
+        src_counts: np.ndarray | None = None,
+        tgt_counts_dict: np.ndarray | None = None,
+        condition_keys: list | None = None,
+        condition_encodings: dict | None = None,
+        conditions: torch.Tensor | None = None,
+        conditions_combined: torch.Tensor | None = None,
+        train_indices: list[int] | None = None,
+        val_indices: list[int] | None = None,
+        test_indices: list[int] | None = None,
+        var_list: list | None = None,
+        context_tps: list | None = None,
     ):
         """
         Description:
         ------------
-        Custom datamodule for CellGen tokenised data.
+        Custom datamodule for CytoMeister tokenised data.
         """
         super().__init__()
         print('Start datamodule')
@@ -151,21 +150,16 @@ class CellGenDataModule(LightningDataModule):
         # form of dictionary with key: value pairs based on condition_keys
 
     def setup(self, stage=None):
-        if self.context_tps is not None:
-            all_modelling_tps = self.pred_tps + self.context_tps
-            self.all_modelling_tps = list(set(all_modelling_tps))
-        else:
-            self.all_modelling_tps = self.pred_tps
         dataset_args = {
             'src_dataset': self.src_dataset,
             'tgt_datasets': self.tgt_datasets,
             'src_counts': self.src_counts,
             'tgt_counts_dict': self.tgt_counts_dict,
-            'time_steps': self.all_modelling_tps,
         }
         # Assign train/val datasets for use in dataloaders
-        # Assign train/val datasets for use in dataloaders
         if stage == 'fit' or stage is None:
+            self.all_modelling_tps = self.pred_tps
+            dataset_args['time_steps'] = self.pred_tps
             if self.condition_encodings is not None:
                 dataset_args['split_indices'] = self.train_indices
                 dataset_args['conditions'] = (
@@ -176,23 +170,28 @@ class CellGenDataModule(LightningDataModule):
                     if self.condition_keys is not None
                     else None
                 )
-                self.train_dataset = CellGenDataset(**dataset_args)
+                self.train_dataset = CytoMeisterDataset(**dataset_args)
                 if self.val_indices is not None:
                     dataset_args['split_indices'] = self.val_indices
-                    self.val_dataset = CellGenDataset(**dataset_args)
+                    self.val_dataset = CytoMeisterDataset(**dataset_args)
                 else:
                     self.val_dataset = None
             else:
                 dataset_args['split_indices'] = self.train_indices
-                self.train_dataset = CellGenDataset(**dataset_args)
+                self.train_dataset = CytoMeisterDataset(**dataset_args)
                 if self.val_indices is not None:
                     dataset_args['split_indices'] = self.val_indices
-                    self.val_dataset = CellGenDataset(**dataset_args)
+                    self.val_dataset = CytoMeisterDataset(**dataset_args)
                 else:
                     self.val_dataset = None
         if stage == 'test' or stage is None:
-            # use all time steps to provide as context
-            self.all_modelling_tps = self.total_tps
+            if self.context_tps is not None:
+                # use only defined time steps for modelling to avoid data leakage
+                self.all_modelling_tps = self.pred_tps + self.context_tps
+            else:
+                print('Define context_tps for testing')
+                self.all_modelling_tps = self.total_tps
+
             dataset_args['time_steps'] = self.all_modelling_tps
             dataset_args['split_indices'] = self.test_indices
             if self.condition_encodings is not None:
@@ -204,9 +203,9 @@ class CellGenDataModule(LightningDataModule):
                     if self.condition_keys is not None
                     else None
                 )
-                self.test_dataset = CellGenDataset(**dataset_args)
+                self.test_dataset = CytoMeisterDataset(**dataset_args)
             else:
-                self.test_dataset = CellGenDataset(**dataset_args)
+                self.test_dataset = CytoMeisterDataset(**dataset_args)
 
     def train_dataloader(self):
         self.dataloader_kwargs['dataset'] = self.train_dataset
@@ -227,7 +226,7 @@ class CellGenDataModule(LightningDataModule):
     def test_dataloader(self):
         self.dataloader_kwargs['dataset'] = self.test_dataset
         self.dataloader_kwargs['collate_fn'] = self.collate
-        data = DataLoader(**self.dataloader_kwargs)
+        data = DataLoader(**self.dataloader_kwargs, drop_last=True)
         return data
 
     def collate(self, batch):
