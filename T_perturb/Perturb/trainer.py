@@ -38,6 +38,7 @@ class PerturberTrainer(CountDecoderTrainer):
         exclude_src: bool = False,
         tokenid_to_rowid_path: str | None = None,
         use_count_decoder: bool = False,
+        pad_condition: bool = False,
         # gene_module_list: List[str] | None = None,
         # num_of_background_genes: int | None = None,
         *args,
@@ -46,6 +47,7 @@ class PerturberTrainer(CountDecoderTrainer):
         super().__init__(*args, **kwargs)
 
         self.validation_mode = validation_mode
+        self.pad_condition = pad_condition
         if validation_mode is not None:
             if perturbation_sequence is None:
                 raise ValueError(
@@ -398,7 +400,7 @@ class PerturberTrainer(CountDecoderTrainer):
                     batch=batch,
                     time_step=i,
                     condition_dict=self.condition_dict,
-                    pad_condition=True,
+                    pad_condition=self.pad_condition
                 )
                 tgt_input_id_ = torch.cat((cond_ids, tgt_input_id_), dim=1)
             tgt_input_id_dict[f'tgt_input_ids_t{i}'] = tgt_input_id_
