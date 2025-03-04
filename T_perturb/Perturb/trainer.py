@@ -528,7 +528,6 @@ class PerturberTrainer(CountDecoderTrainer):
                 (true_outputs, _, true_ids_dict, pred_counts) = self.forward(
                     filtered_batch, perturbation=False
                 )
-                raise
                 (
                     perturbed_outputs,
                     _,
