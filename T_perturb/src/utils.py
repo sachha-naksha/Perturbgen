@@ -915,6 +915,10 @@ def return_perturbation_adata(
         if len(test_dict['pert_counts']) > 0:
             pert_counts = torch.cat(test_dict['pert_counts']).numpy()
     # adata.layers['counts']
+    pred_counts = None
+    if 'pred_counts' in test_dict.keys():
+        if len(test_dict['pred_counts']) > 0:
+            pred_counts = torch.cat(test_dict['pred_counts']).numpy()
     true_counts = None
     if 'true_counts' in test_dict.keys():
         if len(test_dict['true_counts']) > 0:
@@ -986,7 +990,10 @@ def return_perturbation_adata(
         var=pd.DataFrame(
             index=cos_similarity_df.columns,
         ),
-        layers={'counts': true_counts},
+        layers={
+            'pred_counts': pred_counts,
+            'true_counts': true_counts,
+        },
     )
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')

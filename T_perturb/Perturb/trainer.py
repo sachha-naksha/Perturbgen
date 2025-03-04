@@ -254,6 +254,7 @@ class PerturberTrainer(CountDecoderTrainer):
             'true_background_embs',
             'perturbed_background_embs',
             'true_counts',
+            'pred_counts',
             'pert_counts',
         ]:
             self.test_dict[key] = []
@@ -720,13 +721,17 @@ class PerturberTrainer(CountDecoderTrainer):
                 self.test_dict['perturbed_cls'].append(perturbed_mean_embs)
                 if self.use_count_decoder:
                     if t in pert_counts:
-                        true_counts_ = pred_counts[t].detach().cpu()
+                        true_counts_ = filtered_batch[f'tgt_counts_t{t}'].detach().cpu()
+                        pred_counts_ = pred_counts[t].detach().cpu()
                         pert_counts_ = pert_counts[t].detach().cpu()
                         true_counts_ = true_counts_[dupl_outside_batch]
+                        pred_counts_ = pred_counts_[dupl_outside_batch]
                         pert_counts_ = pert_counts_[dupl_outside_batch]
                         true_counts_ = true_counts_[dupl_within_batch]
+                        pred_counts_ = pred_counts_[dupl_within_batch]
                         pert_counts_ = pert_counts_[dupl_within_batch]
                         self.test_dict['true_counts'].append(true_counts_)
+                        self.test_dict['pred_counts'].append(pred_counts_)
                         self.test_dict['pert_counts'].append(pert_counts_)
                     else:
                         Warning(f'Counts are not available for time step: {t}')
