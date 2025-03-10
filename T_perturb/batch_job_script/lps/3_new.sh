@@ -1,7 +1,7 @@
 #make a date directory if it does not exist
 #!/bin/bash
-#BSUB -q gpu-huge # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=shared:num=2' # request for exclusive access to gpu
+#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -gpu 'mode=exclusive_process:num=2' # request for exclusive access to gpu
 #BSUB -n 8 # number of cores
 #BSUB -R "span[ptile=8]"     # split X cores per host
 #BSUB -G team361 # groupname for billing
@@ -24,7 +24,7 @@ echo "--- Start computing model"
 
 # # ----------------- Create folder to save results and copy the script -----------------
 RES_DIR="/lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb/T_perturb/results"
-RES_NAME="lps/count_interpolation_ourMED_ws_on2k_T_C_alltps_ns3_withval"
+RES_NAME="lps/count_interpolation_ourMED_ws_on2k_alltps_ns3_withval"
 # if directory does not exist, create it with the name $RES_NAME
 mkdir -p $RES_DIR/$RES_NAME
 # Get the current timestamp
@@ -66,10 +66,10 @@ python3 /lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb
 --var_list cell_type_cellgen_harm donor_cellgen_harm time_after_LPS \
 --cond_list cell_type_cellgen_harm \
 --encoder scmaskgit \
---add_cell_time True \
+--add_cell_time False \
 --d_condc 64 \
 --d_condt 768 \
---count_dropout 0 \
+--count_dropout 0.1 \
 --use_positional_encoding False \
 --layer_norm True \
 --context_mode True \

@@ -447,8 +447,6 @@ class CytoMeisterTrainer(LightningModule):
                 cross_attn_weights = cross_attn_weights.mean(dim=0).detach().cpu()
                 self.test_dict['self_attn_weights'].append(self_attn_weights)
                 self.test_dict['cross_attn_weights'].append(cross_attn_weights)
-
-            # create mask to remove duplicated cells
             cell_idx = np.array(batch[f'tgt_cell_idx_t{t}'])
             if len(self.test_dict['cell_idx']) == 0:
                 all_cell_idx = np.array([])
@@ -493,19 +491,13 @@ class CytoMeisterTrainer(LightningModule):
                         self.sum_gene_embs[condition] += gene_embeddings[
                             condition_mask
                         ].sum(dim=0)
-                        # count number of non zero gene embeddings
-                        # along the batch dimension
                         non_zero_ids = torch.nonzero(
                             gene_embeddings[condition_mask].sum(dim=2)
                         )
                         non_zero_counts = torch.bincount(
                             non_zero_ids[:, 1], minlength=gene_embeddings.shape[1]
                         )
-                        # count number of non zero gene
-                        # embeddings along the batch dimension
                         self.count_gene_embs[condition] += non_zero_counts.unsqueeze(1)
-            # self.test_dict['gene_embeddings'].append(gene_embeddings)
-            # cosine similarity
             if self.generate:
                 if self.return_rouge_score:
                     pred_ids = (
@@ -795,7 +787,7 @@ class CountDecoderTrainer(LightningModule):
         }
         self.test_dict: Dict[str, List[Any]] = {
             'true_counts': [],
-            'ctrl_counts': [],
+            #'ctrl_counts': [],
             'pred_counts': [],
             'cls_embeddings': [],
             'cell_idx': [],
@@ -845,30 +837,21 @@ class CountDecoderTrainer(LightningModule):
 
         return outputs, tgt_input_id_dict
 
-    def one_hot_encoder(
-        self,
-        idx,
-        n_cls,
-        dtype,
-    ):
-        assert torch.max(idx) < n_cls
-
+    def one_hot_encoder(self,idx, n_cls):
+        assert torch.max(idx).item() < n_cls
         if idx.dim() == 1:
             idx = idx.unsqueeze(1)
-        self.register_buffer(
-            'onehot', torch.zeros(idx.size(0), n_cls, dtype=dtype, device=idx.device)
-        )
-        # change idx dtype to onehot dtype
-        idx = idx.type(self.onehot.dtype)
-        self.onehot.scatter_(1, idx.long(), 1)
-        return self.onehot
+        onehot = torch.zeros(idx.size(0), n_cls)
+        onehot = onehot.to(idx.device)
+        onehot.scatter_(1, idx.long(), 1)
+        return onehot
 
     def compute_dispersion(self, batch):
         dispersions = F.linear(
             self.one_hot_encoder(
                 batch['combined_batch'],
                 self.n_conditions_combined,
-                self.theta.dtype,
+                #self.theta.dtype,
             ),
             self.theta,
         )
@@ -938,6 +921,7 @@ class CountDecoderTrainer(LightningModule):
                         count_dict[time_step] = dec_mean
                     else:
                         # sample from distribution
+                        torch.manual_seed(42)
                         x_pred = zinb_distribution.sample((n_samples,))
                         count_dict[time_step] = x_pred.mean(dim=0)
 
@@ -947,6 +931,7 @@ class CountDecoderTrainer(LightningModule):
                     if n_samples == 1:
                         count_dict[time_step] = dec_mean
                     else:
+                        torch.manual_seed(42)
                         x_pred = nb_distribution.sample((n_samples,))
                         count_dict[time_step] = x_pred.mean(dim=0)
             total_loss += loss

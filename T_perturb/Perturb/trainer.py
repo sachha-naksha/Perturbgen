@@ -39,6 +39,7 @@ class PerturberTrainer(CountDecoderTrainer):
         tokenid_to_rowid_path: str | None = None,
         use_count_decoder: bool = False,
         pad_condition: bool = False,
+        batch_size: int = 16,
         # gene_module_list: List[str] | None = None,
         # num_of_background_genes: int | None = None,
         *args,
@@ -59,44 +60,6 @@ class PerturberTrainer(CountDecoderTrainer):
             self.perturbation_sequence = perturbation_sequence
             self.perturbation_mode = perturbation_mode
 
-            # if gene_module_list is not None:
-            #     self.gene_module_list: List[str] | None = gene_module_list
-            #     if num_of_background_genes is None:
-            #         raise ValueError('Please specify the number of background genes')
-            #     # exclude special tokens from self.gene_to_tgtid
-            #     gene_tokens_filtered = {
-            #         gene: token
-            #         for gene, token in self.gene_to_tgtid.items()
-            #         if gene not in self.special_tokens
-            #     }
-            #     # exclude perturbation tokens from gene_tokens_filtered
-            #     gene_tokens_filtered = {
-            #         gene: token
-            #         for gene, token in gene_tokens_filtered.items()
-            #         if token not in self.tgt_pert_tokens
-            #     }
-            #     self.gene_module_dict = {
-            #         gene: gene_tokens_filtered[gene] for gene in gene_module_list
-            #     }
-
-            #     # remove gene_module_tokens from selection of background genes
-            #     background_gene_dict = {
-            #         gene: token
-            #         for gene, token in gene_tokens_filtered.items()
-            #         if gene not in gene_module_list
-            #     }
-            #     # filter out all values which are >100 in background_gene_dict
-            #     background_gene_dict = {
-            #         gene: token
-            #         for gene, token in background_gene_dict.items()
-            #         if token < 100
-            #     }
-            #     random_entries = random.sample(
-            #         list(background_gene_dict.items()), num_of_background_genes
-            #     )
-            #     self.background_gene_dict = dict(random_entries)
-            # else:
-            #     self.gene_module_list = None
         # dictionary to map gene names to row ids in tgt
         if kwargs['mapping_dict_path'] is not None:
             with open(
@@ -491,10 +454,7 @@ class PerturberTrainer(CountDecoderTrainer):
 
     def test_step(self, batch, *args, **kwargs):
         if self.tgt_pert_tokens is not None:
-            if self.pert_tps is not None:
-                pert_tps_ = self.pert_tps
-            else:
-                pert_tps_ = self.pred_tps
+            pert_tps_ = self.pert_tps
             # remove cells where perturbed gene is not present
             tgt_mask_list = []
             for t in pert_tps_:
@@ -521,6 +481,7 @@ class PerturberTrainer(CountDecoderTrainer):
         # if all cells are removed where boolean mask is all False
         if np.sum(remove_cells_wo_pert) > 0:
             # remove cells without perturbation
+            #filtered_batch = batch
             filtered_batch = {
                 k: self.apply_mask(v, remove_cells_wo_pert)
                 for k, v in batch.items()
@@ -563,13 +524,9 @@ class PerturberTrainer(CountDecoderTrainer):
                     **decoder_kwargs,
                 )
                 for t in self.pred_tps:
-                    # pert_ids = perturbed_ids_dict[t].detach().cpu().numpy()
                     true_ids = true_ids_dict[t].detach().cpu().numpy()
                     # ground truth
-                    input_ids = (
-                        filtered_batch[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
-                    )
-
+                    input_ids = filtered_batch[f'tgt_input_ids_t{t}'].detach().cpu().numpy()
                     test_dict = compute_rouge_score(
                         rouge=self.rouge,
                         pred_ids=true_ids,
@@ -586,30 +543,16 @@ class PerturberTrainer(CountDecoderTrainer):
                 )
 
             for t in self.pred_tps:
-                # create a mask for special tokens to exlude
-                # them from the cosine similarity & logits and probs
                 cond_len = len(self.condition_dict)
                 true_gene = true_outputs[t]['dec_embedding'][:, cond_len:, :]
                 true_mean_embs = true_outputs[t]['mean_embedding']
                 true_mean_embs_l1 = true_outputs[t]['mean_embedding_l1']
                 true_mean_embs_lmid = true_outputs[t]['mean_embedding_lmid']
-                # true_logits = true_outputs[t]['dec_logits'][:, 1:, :]
                 perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, cond_len:, :]
                 perturbed_mean_embs = perturbed_outputs[t]['mean_embedding']
                 perturbed_mean_embs_l1 = perturbed_outputs[t]['mean_embedding_l1']
                 perturbed_mean_embs_lmid = perturbed_outputs[t]['mean_embedding_lmid']
 
-                # perturbed_logits = perturbed_outputs[t]['dec_logits'][:, 1:, :]
-
-                # true_probs = torch.softmax(true_logits, dim=-1)
-                # perturbed_probs = torch.softmax(perturbed_logits, dim=-1)
-                # delta_probs = torch.abs(true_probs - perturbed_probs)
-                # token_probs_change = delta_probs.sum(dim=-1)
-                # delta_gene_probs, self.marker_genes = map_results_to_genes(
-                #     token_probs_change,
-                #     mapping_dict=self.gene_to_tgtid,
-                #     token_ids=batch[f'tgt_input_ids_t{t}'],
-                # )
                 true_ids = true_ids_dict[f'tgt_input_ids_t{t}'][:, cond_len:]
                 perturbed_ids = perturbed_ids_dict[f'tgt_input_ids_t{t}'][:, cond_len:]
                 if (self.perturbation_mode == 'delete') or (
@@ -681,17 +624,6 @@ class PerturberTrainer(CountDecoderTrainer):
                 (dupl_within_batch, cell_idx_filter_) = mask_duplicates_within_batches(
                     cell_idx_filter_
                 )
-                # # iterate over the batch and compute the wasserstein distance
-                # wd = []
-                # for i in range(true_cls.shape[0]):
-                #     print(true_cls[i].shape)
-                #     wd.append(wasserstein(
-                #         true_cls[i],
-                #         perturbed_cls[i],
-                #         power=1
-                #     ))
-
-                # cls_cos_sim = cls_cos_sim.detach().cpu().to(torch.float16)
                 mean_cos_sim = mean_cos_sim.detach().cpu().to(torch.float16)
                 mean_cos_sim_l1 = mean_cos_sim_l1.detach().cpu().to(torch.float16)
                 mean_cos_sim_lmid = mean_cos_sim_lmid.detach().cpu().to(torch.float16)
@@ -737,7 +669,6 @@ class PerturberTrainer(CountDecoderTrainer):
                         self.test_dict['pert_counts'].append(pert_counts_)
                     else:
                         Warning(f'Counts are not available for time step: {t}')
-                # return obs_key
                 self.test_dict['cell_idx'].append(cell_idx_filter_)
                 if len(self.var_list) > 0:
                     for var in self.var_list:

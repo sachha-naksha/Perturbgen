@@ -16,7 +16,7 @@
 cwd=$(pwd)
 
 RES_DIR="/lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb/T_perturb/results"
-RES_NAME="lps/generate_6h_interpolation_opthp_ourMED_e15_on2k_e3_nosplit_len150_C_T_newTem_newP"
+RES_NAME="lps/generate_6h_interpolation_opthp_ourMED_e15_on2k_e3_nosplit_len150_C_T_newTem_newP_test_Dup"
 # if directory does not e
 # echo create it with the name $RES_NAME
 mkdir -p $RES_DIR/$RES_NAME
@@ -54,7 +54,6 @@ python3 /lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb
 --loss_mode zinb \
 --n_workers 32 \
 --pred_tps 1 2 3 \
---context_tps 1 2 3 \
 --var_list cell_type_cellgen_harm donor_cellgen_harm time_after_LPS \
 --cond_list cell_type_cellgen_harm \
 --encoder scmaskgit \
