@@ -6,9 +6,9 @@ data:
   cond_list:
     - 'celltype_v2'
     - 'diff_state'
-  perturb_genes_file: 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/gene_embedding/20250312_gene_clusters_LMPP_L4.csv'
-  perturb_cluster:
-  - '75'
+  # perturb_genes_file: 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/gene_embedding/20250312_gene_clusters_LMPP_L4.csv'
+  # perturb_cluster:
+  # - '44'
 
 trainer:
   tgt_vocab_size: 5710
@@ -28,9 +28,9 @@ trainer:
   temperature: 1.5
   iterations: 19
   pos_encoding_mode: 'time_pos_sin'
-  perturbation_mode: 'delete'
+  perturbation_mode: 'mask'
   genes_to_perturb:
-    - 'MPO'
+    - 'GP1BB'
   validation_mode: 'inference'
   perturbation_sequence:
     - 'src'

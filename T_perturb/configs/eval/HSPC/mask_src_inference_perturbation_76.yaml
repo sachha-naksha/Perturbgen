@@ -1,14 +1,14 @@
 data:
-  tgt_dataset_folder: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt_pert"
-  src_dataset_file: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_src_pert/intermediate.dataset"
-  src_adata_file: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_src_pert/intermediate.h5ad"
-  tgt_adata_folder: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_tgt_pert"
+  tgt_dataset_folder: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt"
+  src_dataset_file: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/dataset_10000_hvg_src/stem.dataset"
+  src_adata_file: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_src/stem.h5ad"
+  tgt_adata_folder: "T_perturb/T_perturb/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_tgt"
   cond_list:
     - 'celltype_v2'
     - 'diff_state'
   perturb_genes_file: 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/gene_embedding/20250312_gene_clusters_LMPP_L4.csv'
   perturb_cluster:
-  - '75'
+  - '76'
 
 trainer:
   tgt_vocab_size: 5710
@@ -28,7 +28,7 @@ trainer:
   temperature: 1.5
   iterations: 19
   pos_encoding_mode: 'time_pos_sin'
-  perturbation_mode: 'delete'
+  perturbation_mode: 'mask'
   genes_to_perturb:
     - 'MPO'
   validation_mode: 'inference'

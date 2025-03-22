@@ -750,9 +750,6 @@ class CytoMeister(nn.Module):
         self.context_tps = context_tps
         self.total_tps = list(range(1, n_total_tps + 1))
         self.mask_token = 1
-        # add number of CLS tokens to the vocab size
-        # total_vocab_size = tgt_vocab_size + n_total_tps
-        # total_vocab_size = total_vocab_size + 1  # add one for padding token
         self.token_embedding = nn.Embedding(
             tgt_vocab_size, d_model, padding_idx=pad_token
         )
