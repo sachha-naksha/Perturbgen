@@ -547,49 +547,62 @@ class PerturberTrainer(CountDecoderTrainer):
                 )
 
             for t in self.pred_tps:
-                cond_len = len(self.condition_dict)
-                true_gene = true_outputs[t]['dec_embedding'][:, cond_len:, :]
+                true_gene = true_outputs[t]['dec_embedding']
+                perturbed_gene = perturbed_outputs[t]['dec_embedding']
+                true_ids = true_ids_dict[f'tgt_input_ids_t{t}']
+                perturbed_ids = perturbed_ids_dict[f'tgt_input_ids_t{t}']
+
                 true_mean_embs = true_outputs[t]['mean_embedding']
                 true_mean_embs_l1 = true_outputs[t]['mean_embedding_l1']
                 true_mean_embs_lmid = true_outputs[t]['mean_embedding_lmid']
-                perturbed_gene = perturbed_outputs[t]['dec_embedding'][:, cond_len:, :]
                 perturbed_mean_embs = perturbed_outputs[t]['mean_embedding']
                 perturbed_mean_embs_l1 = perturbed_outputs[t]['mean_embedding_l1']
                 perturbed_mean_embs_lmid = perturbed_outputs[t]['mean_embedding_lmid']
 
-                true_ids = true_ids_dict[f'tgt_input_ids_t{t}'][:, cond_len:]
-                perturbed_ids = perturbed_ids_dict[f'tgt_input_ids_t{t}'][:, cond_len:]
+                if self.condition_dict is not None:
+                    cond_len = len(self.condition_dict)
+                    true_gene = true_gene[:, cond_len:, :]
+                    perturbed_gene = perturbed_gene[:, cond_len:, :]
+                    true_ids = true_ids[:, cond_len:]
+                    perturbed_ids = perturbed_ids[:, cond_len:]
+
                 if (self.perturbation_mode == 'delete') or (
                     self.perturbation_mode == 'overexpress'
                 ):
-                    # TODO: see ChatGPT and complete the code
-                    # create a mask for perturbed gene
-                    if self.perturbation_mode == 'overexpress':
-                        # remove overexpressed genes from true_gene and perturbed_gene
-                        perturbed_ids[
-                            :, : len(self.tgt_pert_tokens)
-                        ] = self.pad_token_id
+                    if self.perturbation_sequence == 'tgt':
+                        # create a mask for perturbed gene
+                        if self.perturbation_mode == 'overexpress':
+                            # remove overexpressed genes from
+                            # true_gene and perturbed_gene
+                            perturbed_ids[
+                                :, : len(self.tgt_pert_tokens)
+                            ] = self.pad_token_id
 
-                    match_mask = true_ids.unsqueeze(1) == perturbed_ids.unsqueeze(
-                        2
-                    )  # (batch_size, seq_len, seq_len)
-                    true_indices = match_mask.float().argmax(dim=2)  # shape: [B, T]
-                    b, seq, emb_dim = true_gene.shape
-                    true_ids = torch.gather(true_ids, 1, true_indices)
-                    true_gene = torch.gather(
-                        true_gene, 1, true_indices.unsqueeze(2).expand(b, seq, emb_dim)
-                    )
-                    if self.perturbation_mode == 'overexpress':
-                        # remove overexpressed genes from true_gene and perturbed_gene
-                        true_gene = true_gene[:, len(self.tgt_pert_tokens) :, :]
-                        true_ids = true_ids[:, len(self.tgt_pert_tokens) :]
-                        perturbed_gene = perturbed_gene[
-                            :, len(self.tgt_pert_tokens) :, :
-                        ]
-                        perturbed_ids = perturbed_ids[:, len(self.tgt_pert_tokens) :]
+                        match_mask = true_ids.unsqueeze(1) == perturbed_ids.unsqueeze(
+                            2
+                        )  # (batch_size, seq_len, seq_len)
+                        true_indices = match_mask.float().argmax(dim=2)  # shape: [B, T]
+                        b, seq, emb_dim = true_gene.shape
+                        true_ids = torch.gather(true_ids, 1, true_indices)
+                        true_gene = torch.gather(
+                            true_gene,
+                            1,
+                            true_indices.unsqueeze(2).expand(b, seq, emb_dim),
+                        )
+                        if self.perturbation_mode == 'overexpress':
+                            # remove overexpressed genes
+                            # from true_gene and perturbed_gene
+                            true_gene = true_gene[:, len(self.tgt_pert_tokens) :, :]
+                            true_ids = true_ids[:, len(self.tgt_pert_tokens) :]
+                            perturbed_gene = perturbed_gene[
+                                :, len(self.tgt_pert_tokens) :, :
+                            ]
+                            perturbed_ids = perturbed_ids[
+                                :, len(self.tgt_pert_tokens) :
+                            ]
 
-                    # check if true_gene_ids is equal to perturbed_gene_ids
-                    torch.allclose(true_ids, perturbed_ids)
+                        # check if true_gene_ids is equal to perturbed_gene_ids
+                        torch.allclose(true_ids, perturbed_ids)
 
                 gene_cos_sim = cosine_similarity(
                     true_gene,
