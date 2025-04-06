@@ -13,7 +13,7 @@ from datasets import concatenate_datasets, load_from_disk
 # from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import DDPStrategy  # ,DeepSpeedStrategy
+from pytorch_lightning.strategies import DeepSpeedStrategy  # ,DeepSpeedStrategy
 
 from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
 from T_perturb.Model.trainer import CountDecoderTrainer, CytoMeisterTrainer
@@ -585,11 +585,11 @@ def main() -> None:
     )
     accelerator = 'gpu' if torch.cuda.is_available() else 'cpu'
     print('Using device {}.'.format(accelerator))
-    # deepspeed_strategy = DeepSpeedStrategy(
-    #     stage=2,
-    #     # offload_optimizer=True,
-    #     # offload_parameters=True,
-    # )
+    deepspeed_strategy = DeepSpeedStrategy(
+        stage=2,
+        # offload_optimizer=True,
+        # offload_parameters=True,
+    )
 
     # if torch.cuda.is_available():
     #     cuda_device_name = torch.cuda.get_device_name()
@@ -644,7 +644,7 @@ def main() -> None:
     #     checkpoint_path=checkpoint_path, filename=filename
     # )
     # If the device is an A100, set the precision for matrix multiplication
-    ddp_strategy = DDPStrategy(find_unused_parameters=False)
+    # ddp_strategy = DDPStrategy(find_unused_parameters=False)
 
     trainer = pl.Trainer(
         logger=wandb_logger,
@@ -660,7 +660,7 @@ def main() -> None:
         # gradient_clip_val=1.0,
         devices=-1 if torch.cuda.is_available() else 0,
         num_nodes=args.num_node,
-        strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
+        strategy=deepspeed_strategy if torch.cuda.device_count() > 1 else 'auto',
     )
 
     if args.train_mode == 'masking':

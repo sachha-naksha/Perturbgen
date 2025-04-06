@@ -256,8 +256,9 @@ with open(args.gene_mapping_path, 'rb') as f:
     genename_dict = pickle.load(f)
 
 
-# exclude special tokens
+# # exclude special tokens
 special_tokens = [0, 1, 2, 3]
+special_tokens_dict = {v: k for k, v in token_dict.items() if v in special_tokens}
 token_dict = {k: v for k, v in token_dict.items() if v not in special_tokens}
 # change keys and values of genename_dict
 genename_dict = {v: k for k, v in genename_dict.items()}
@@ -265,6 +266,8 @@ genename_dict = {v: k for k, v in genename_dict.items()}
 token_to_genename = {
     v: genename_dict[k] for k, v in token_dict.items() if k in genename_dict
 }
+if args.gene_filtering_mode == 'all':
+    token_to_genename.update(special_tokens_dict)
 
 os.makedirs(f'./T_perturb/T_perturb/pp/res/{args.dataset}', exist_ok=True)
 
@@ -275,7 +278,6 @@ with open(
     'wb',
 ) as file:
     pickle.dump(token_to_genename, file)
-
 
 # # ignore CLS token because of redudancy with time task token
 # if pd.NA in token_id_to_row_id_dict:
@@ -321,33 +323,31 @@ adata.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
 
 # subset adata to only genes in the token dictionary
 # filter adata for only genes occuring in the token dictionary
-if args.gene_filtering_mode == 'all':
-    adata_subset = adata
-else:
-    (adata_subset, token_id_to_row_id_dict, row_id_to_gene_name) = tokenid_mapping(
-        adata,
-        # './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
-        args.token_dict_path,
-        exclude_non_GF_genes=True,
-    )
-    # save row id to gene name mapping
-    with open(
-        f'./T_perturb/T_perturb/pp/res/{args.dataset}'
-        f'/token_id_to_genename_{gene_filter_mode_suffix}.pkl',
-        'wb',
-    ) as file:
-        pickle.dump(row_id_to_gene_name, file)
-    # save token id to row id mapping
-    with open(
-        f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
-        f'tokenid_to_rowid_{gene_filter_mode_suffix}.pkl',
-        'wb',
-    ) as file:
-        pickle.dump(token_id_to_row_id_dict, file)
-    if args.exclude_non_GF_genes is True:
-        adata_subset.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
+(adata_subset, token_id_to_row_id_dict, row_id_to_gene_name) = tokenid_mapping(
+    adata,
+    # './T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
+    args.token_dict_path,
+    exclude_non_GF_genes=True,
+)
+# save row id to gene name mapping
+with open(
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}'
+    f'/token_id_to_genename_{gene_filter_mode_suffix}.pkl',
+    'wb',
+) as file:
+    pickle.dump(row_id_to_gene_name, file)
+# save token id to row id mapping
+with open(
+    f'./T_perturb/T_perturb/pp/res/{args.dataset}/'
+    f'tokenid_to_rowid_{gene_filter_mode_suffix}.pkl',
+    'wb',
+) as file:
+    pickle.dump(token_id_to_row_id_dict, file)
+if args.exclude_non_GF_genes is True:
+    adata_subset.write_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
 print('Finished preprocessing adata.')
 print('Start tokenisation of adata...')
+
 output_dir = (
     f'./T_perturb/T_perturb/pp/res/{args.dataset}/' f'dataset_{gene_filter_mode_suffix}'
 )
@@ -408,15 +408,13 @@ paired_dataset_dir = (
 #         'rb',
 #     )
 # )
-if args.gene_filtering_mode == 'all':
-    dataset_mapped = dataset
-else:
-    dataset_mapped = dataset.map(
-        lambda example: map_input_ids_to_row_id(
-            example, token_id_to_row_id_dict, ignore_tokens=[2]
-        ),
-        num_proc=4,
-    )
+
+dataset_mapped = dataset.map(
+    lambda example: map_input_ids_to_row_id(
+        example, token_id_to_row_id_dict, ignore_tokens=[2]
+    ),
+    num_proc=4,
+)
 n_tgt_iter = 1  # for enumerating the timepoints
 for time_point in tqdm.tqdm(args.time_point_order):
     # subset adata by cell pairings

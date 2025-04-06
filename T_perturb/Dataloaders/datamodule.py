@@ -290,6 +290,7 @@ class CytoMeisterDataModule(LightningDataModule):
         if (self.use_weighted_sampler) and (
             self.train_dataset.label_weights is not None
         ):
+            self.dataloader_kwargs['shuffle'] = False
             sampler = WeightedRandomSampler(
                 weights=self.train_dataset.label_weights,
                 num_samples=len(self.train_dataset),
