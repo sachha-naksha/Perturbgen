@@ -1515,15 +1515,15 @@ def pairing_src_to_tgt_cells(
                 mapping_df_ = mapping_df[mapping_df['intermediate'] == intermediate]
                 # create a list of all entries in dataframe
                 for category in obs_filter['pairing_obs'].unique():
-                    max_reference_time_opt = max_reference_time_opt[intermediate][
+                    max_reference_time_opt_ = max_reference_time_opt[intermediate][
                         category
                     ]
                     obs_dict_opt_ = obs_dict_opt[intermediate][category]
-                    cell_pairing_idx = obs_dict_opt_[max_reference_time_opt].index
-                    cell_pairings[max_reference_time_opt].extend(cell_pairing_idx)
+                    cell_pairing_idx = obs_dict_opt_[max_reference_time_opt_].index
+                    cell_pairings[max_reference_time_opt_].extend(cell_pairing_idx)
                     n_cells_to_pair = len(cell_pairing_idx)
                     for stage, obs_dict_tmp in obs_dict_opt_.items():
-                        if stage != max_reference_time_opt:
+                        if stage != max_reference_time_opt_:
                             cell_to_pair = obs_dict_tmp['celltype_v2'][
                                 obs_dict_tmp['celltype_v2'].isin(mapping_df_[stage])
                             ].index

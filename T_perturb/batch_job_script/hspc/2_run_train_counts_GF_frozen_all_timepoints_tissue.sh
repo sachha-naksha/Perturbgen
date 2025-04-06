@@ -1,6 +1,6 @@
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=3:block=yes' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
+#BSUB -gpu 'mode=exclusive_process:num=4:block=yes' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
 #BSUB -n 4 # number of cores
 #BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb # working directory
@@ -42,15 +42,15 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --splitting_mode stratified \
 --split_obs celltype_v2 \
 --output_dir $RES_DIR/$RES_NAME/ \
---src_dataset "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue/dataset_10000_hvg_src/stem.dataset" \
---tgt_dataset_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue/dataset_10000_hvg_tgt" \
---src_adata "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue/h5ad_pairing_10000_hvg_src/stem.h5ad" \
---tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue/h5ad_pairing_10000_hvg_tgt" \
---mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue/token_id_to_genename_10000_hvg.pkl" \
+--src_dataset "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue_all/dataset_all_src/stem.dataset" \
+--tgt_dataset_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue_all/dataset_all_tgt" \
+--src_adata "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue_all/h5ad_pairing_all_src/stem.h5ad" \
+--tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue_all/h5ad_pairing_all_tgt" \
+--mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc_pbmc_median_tissue_all/token_id_to_genename_all.pkl" \
 --batch_size 64 \
---max_len 2200 \
+--max_len 4100 \
 --epochs 20 \
---tgt_vocab_size 5710 \
+--tgt_vocab_size 17458 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
 --count_lr 0.005 \
