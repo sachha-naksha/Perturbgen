@@ -160,6 +160,7 @@ def main() -> None:
 
     # Define path to load checkpoint
     n_total_tps = len(tgt_adatas)
+    print(n_total_tps)
     config['trainer']['max_seq_length'] = config['trainer']['max_seq_length'] + 100
     config['trainer']['tgt_vocab_size'] = token_no + 50
 
@@ -203,7 +204,13 @@ def main() -> None:
             state_dict = torch.load(
                 config['model']['ckpt_masking_path'], map_location='cpu'
             )
-            decoder_module.load_state_dict(state_dict, strict=False)
+            missing, unexpected = decoder_module.load_state_dict(
+                state_dict, strict=False
+            )
+            if len(missing) > 1:
+                raise Warning(f'Missing keys in state_dict: {missing}')
+            if len(unexpected) > 1:
+                raise Warning(f'Unexpected keys in state_dict: {unexpected}')
             trainer.test(
                 decoder_module,
                 data_module,

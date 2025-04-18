@@ -258,7 +258,7 @@ if args.gene_filtering_mode == 'degs':
 #     sc.pp.log1p(adata)
 
 sc.pp.filter_cells(adata, min_genes=1000)
-sc.pp.filter_genes(adata, min_cells=3)
+sc.pp.filter_genes(adata, min_cells=10)
 
 if args.remove_mito_ribo_genes:
     print('Removing mitochondrial and ribosomal genes...')
@@ -269,7 +269,6 @@ if args.remove_mito_ribo_genes:
     mito_ribo_genes = adata.var['gene_name'].str.startswith('MRPS') | adata.var[
         'gene_name'
     ].str.startswith('MRPL')
-
     genes_to_keep = ~(mito_genes | ribo_genes | mito_ribo_genes)
     adata = adata[:, genes_to_keep]
     print(f'Filtered out {np.sum(~genes_to_keep)} genes')
@@ -364,15 +363,37 @@ if args.gene_filtering_mode == 'hvg':
         flavor='seurat_v3',
         batch_key=args.time_obs,
     )
-    print(adata_subset)
     if args.genes_to_include is not None:
         adata_subset[:, adata_subset.var['gene_name'].isin(args.genes_to_include)].var[
             'highly_variable'
         ] = True
     if args.genes_to_include_path is not None:
         genes_to_include = pd.read_csv(args.genes_to_include_path, header=0)
+        # filter for TF expressed in min 1000 cells
+        high_expressed_genes = (
+            adata_subset[:, np.count_nonzero(adata_subset.X.toarray(), axis=0) >= 1000]
+            .var['gene_name']
+            .unique()
+            .tolist()
+        )
+        intersect_genes = list(
+            set(genes_to_include['gene_name']).intersection(set(high_expressed_genes))
+        )
+        genes_to_include.loc[
+            genes_to_include['gene_name'].isin(intersect_genes), 'lower_bound_filter'
+        ] = 'included'
+        genes_to_include_ = genes_to_include[
+            genes_to_include['lower_bound_filter'] == 'included'
+        ].copy()
         # convert to list
-        genes_to_include_ = genes_to_include['gene_name'].unique().tolist()
+        genes_to_include_ = genes_to_include_['gene_name'].unique().tolist()
+        excluded_genes = set(genes_to_include['gene_name'].unique().tolist()) - set(
+            genes_to_include_
+        )
+        # print only first 5 genes
+        excluded_genes_5 = list(excluded_genes)[:5]
+        print(f'Number of excluded genes: {len(excluded_genes)}')
+        print(f'Excluded genes: {excluded_genes_5}')
         mask = adata_subset.var['gene_name'].isin(genes_to_include_)
         adata_subset.var.loc[mask, 'highly_variable'] = True
     adata_subset = adata_subset[:, adata_subset.var['highly_variable']].copy()

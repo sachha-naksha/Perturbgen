@@ -18,7 +18,7 @@ echo "--- Start tokenisation"
 
 python3 $cwd/pp/GF_tokenisation.py \
 --h5ad_path './data/20241026_HSPC/cd34.h5ad' \
---dataset hspc_pbmc_median_inter_tissue_5k_tf \
+--dataset hspc_pbmc_median_inter_tissue_5k_all_tf \
 --var_list assignment_id sex tissue phase\
  celltype_v2 donor_tissue diff_state dataset\
  cell_pairing_index \
@@ -26,9 +26,10 @@ python3 $cwd/pp/GF_tokenisation.py \
 --time_obs 'diff_state' \
 --opt_pairing_obs 'tissue' \
 --gene_filtering_mode 'hvg' \
+--remove_mito_ribo_genes True \
 --n_hvg 5000 \
 --nproc 4 \
---genes_to_include_path 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/1639_Human_TF_filtered.csv' \
+--genes_to_include_path 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/1639_Human_TF.csv' \
 --reference_time intermediate \
 --time_point_order intermediate terminal \
 --gene_median_path '/lustre/scratch126/cellgen/team361/am74/Adib/TRACE/Loom_cohort/tdigest/2nd_run/Dictionaries/filtered_trace_median.pkl' \

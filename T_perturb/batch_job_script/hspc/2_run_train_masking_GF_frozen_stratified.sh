@@ -67,7 +67,8 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --context_mode True \
 --mask_scheduler 'cosine' \
 --pos_encoding_mode 'time_pos_sin' \
---d_model 768
+--d_model 768 \
+--use_weighted_sampler False
 echo "--- Finished computing model"
 
 # 2k hvgs

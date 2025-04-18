@@ -48,9 +48,9 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --tgt_adata_folder "T_perturb/T_perturb/pp/res/hspc_pbmc_median_inter_tissue_5k_tf/h5ad_pairing_5000_hvg_tgt" \
 --mapping_dict_path  "T_perturb/T_perturb/pp/res/hspc_pbmc_median_inter_tissue_5k_tf/token_id_to_genename_5000_hvg.pkl" \
 --batch_size 64 \
---max_len 2885 \
---epochs 30 \
---tgt_vocab_size 5857 \
+--max_len 2943 \
+--epochs 25 \
+--tgt_vocab_size 5848 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
 --mlm_prob 0.15 \
