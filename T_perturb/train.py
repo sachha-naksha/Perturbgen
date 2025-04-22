@@ -13,7 +13,7 @@ from datasets import concatenate_datasets, load_from_disk
 # from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.strategies import DeepSpeedStrategy  # ,DeepSpeedStrategy
+from pytorch_lightning.strategies import DDPStrategy, DeepSpeedStrategy
 
 from T_perturb.Dataloaders.datamodule import CytoMeisterDataModule
 from T_perturb.Model.trainer import CountDecoderTrainer, CytoMeisterTrainer
@@ -44,6 +44,12 @@ def get_args():
         type=str,
         default='masking',
         help='Mode [masking, count]',
+    )
+    parser.add_argument(
+        '--parallel_distribution',
+        type=str,
+        choices=['ddp', 'deepspeed'],
+        default='ddp',
     )
     parser.add_argument(
         '--split',
@@ -585,11 +591,14 @@ def main() -> None:
     )
     accelerator = 'gpu' if torch.cuda.is_available() else 'cpu'
     print('Using device {}.'.format(accelerator))
-    deepspeed_strategy = DeepSpeedStrategy(
-        stage=2,
-        # offload_optimizer=True,
-        # offload_parameters=True,
-    )
+    if args.parallel_distribution == 'deepspeed':
+        parallel_comp_strategy = DeepSpeedStrategy(
+            stage=2,
+            # offload_optimizer=True,
+            # offload_parameters=True,
+        )
+    elif args.parallel_distribution == 'ddp':
+        parallel_comp_strategy = DDPStrategy(find_unused_parameters=False)
 
     # if torch.cuda.is_available():
     #     cuda_device_name = torch.cuda.get_device_name()
@@ -644,7 +653,6 @@ def main() -> None:
     #     checkpoint_path=checkpoint_path, filename=filename
     # )
     # If the device is an A100, set the precision for matrix multiplication
-    # ddp_strategy = DDPStrategy(find_unused_parameters=False)
 
     trainer = pl.Trainer(
         logger=wandb_logger,
@@ -660,7 +668,7 @@ def main() -> None:
         # gradient_clip_val=1.0,
         devices=-1 if torch.cuda.is_available() else 0,
         num_nodes=args.num_node,
-        strategy=deepspeed_strategy if torch.cuda.device_count() > 1 else 'auto',
+        strategy=parallel_comp_strategy if torch.cuda.device_count() > 1 else 'auto',
     )
 
     if args.train_mode == 'masking':
@@ -670,7 +678,13 @@ def main() -> None:
             if args.ckpt_masking_path.endswith('.bin'):
                 # load the model from the bin file
                 state_dict = torch.load(args.ckpt_masking_path, map_location='cpu')
-                pretrained_module.load_state_dict(state_dict, strict=False)
+                missing, unexpected = pretrained_module.load_state_dict(
+                    state_dict, strict=False
+                )
+                if len(missing) > 1:
+                    raise Warning(f'Missing keys in state_dict: {missing}')
+                if len(unexpected) > 1:
+                    raise Warning(f'Unexpected keys in state_dict: {unexpected}')
                 trainer.fit(
                     pretrained_module,
                     data_module,
