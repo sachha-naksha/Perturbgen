@@ -1,6 +1,6 @@
 #make a date directory if it does not exist
 #!/bin/bash
-#BSUB -q gpu-huge # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-cellgeni-a100)
+#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-cellgeni-a100)
 #BSUB -gpu 'mode=exclusive_process:num=2:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
 #BSUB -n 4 # number of cores
 #BSUB -G team361 # groupname for billing
@@ -56,15 +56,15 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --d_ff 32 \
 --pred_tps 1 2 3 \
 --var_list Time_point \
---encoder scmaskgit \
 --cond_list Time_point \
+--encoder scmaskgit \
 --context_mode True \
 --encoder_path "/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt" \
 --pos_encoding_mode time_pos_sin \
 --mask_scheduler 'pow' \
---seed 100 \
---d_model 768
-
+--seed 42 \
+--d_model 768 \
+--use_weighted_sampler False
 echo '--- Finished computing model'
 
 # PBMC median

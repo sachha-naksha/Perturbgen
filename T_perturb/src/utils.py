@@ -21,11 +21,13 @@ import tqdm
 from datasets import DatasetDict, load_from_disk
 from geneformer import EmbExtractor
 from geneformer.emb_extractor import get_embs, label_cell_embs
+from scipy import stats
 from scipy.sparse import csr_matrix
 from torch.nn.functional import cosine_similarity
 from torch.optim import Optimizer
 from torch.utils.data import Subset
-from torchmetrics import PearsonCorrCoef
+
+# from torchmetrics import PearsonCorrCoef
 
 
 class WarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
@@ -1087,13 +1089,18 @@ def pearson(
     if ctrl_counts is not None:
         pred_counts = pred_counts - ctrl_counts
         true_counts = true_counts - ctrl_counts
-    num_outputs = true_counts.shape[0]
-    pearson = PearsonCorrCoef(num_outputs=num_outputs).to(pred_counts.device)
-    pred_counts_t = pred_counts.transpose(0, 1)
-    true_counts_t = true_counts.transpose(0, 1)
-    pearson_output = pearson(pred_counts_t, true_counts_t)
-    mean_pearson = torch.mean(pearson_output)
-    return mean_pearson
+    # num_outputs = true_counts.shape[0]
+    # pearson = PearsonCorrCoef(num_outputs=num_outputs)
+    # pred_counts_t = pred_counts.transpose(0, 1)
+    # true_counts_t = true_counts.transpose(0, 1)
+    # pearson_output = pearson(pred_counts_t, true_counts_t)
+    # mean_pearson = torch.mean(pearson_output)
+    x_true = np.average(true_counts, axis=1)
+    x_pred = np.average(pred_counts, axis=1)
+    print(f'Pearson correlation: {np.corrcoef(x_true, x_pred)[0, 1]}')
+    _, _, r_value, _, _ = stats.linregress(x_true, x_pred)
+    pearson_r = r_value**2
+    return pearson_r
 
 
 def subset_adata_dataset(

@@ -707,10 +707,16 @@ class CountDecoderTrainer(LightningModule):
         if ckpt_masking_path is not None:
             checkpoint = torch.load(ckpt_masking_path, map_location='cpu')
             state_dict_ = modify_ckpt_state_dict(checkpoint, 'transformer.')
-            self.pretrained_model.load_state_dict(state_dict_, strict=False)
+            missing, unexpected = self.pretrained_model.load_state_dict(
+                state_dict_, strict=False
+            )
             # set parameters to not trainable
             for param in self.pretrained_model.parameters():
                 param.requires_grad = False
+            if len(missing) > 1:
+                raise Warning(f'Missing keys in state_dict: {missing}')
+            if len(unexpected) > 1:
+                raise Warning(f'Unexpected keys in state_dict: {unexpected}')
         self.return_rouge_score = return_rouge_score
         self.decoder = CountDecoder(
             pretrained_model=self.pretrained_model,
@@ -899,7 +905,7 @@ class CountDecoderTrainer(LightningModule):
                     .mean()
                     .float()
                 )
-                count_dict[time_step] = count_ouput['count_lognorm']
+                count_dict[time_step] = count_ouput['count_lognorm'].detach().cpu()
             elif self.loss_mode in ['zinb', 'nb']:
                 dec_mean = count_ouput['count_mean'] * batch_size_factor.expand_as(
                     count_ouput['count_mean']
@@ -913,22 +919,22 @@ class CountDecoderTrainer(LightningModule):
                     )
                     loss = -zinb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
-                        count_dict[time_step] = dec_mean
+                        count_dict[time_step] = dec_mean.detach().cpu()
                     else:
                         # sample from distribution
                         torch.manual_seed(42)
                         x_pred = zinb_distribution.sample((n_samples,))
-                        count_dict[time_step] = x_pred.mean(dim=0)
+                        count_dict[time_step] = x_pred.mean(dim=0).detach().cpu()
 
                 elif self.loss_mode == 'nb':
                     nb_distribution = NegativeBinomial(mu=dec_mean, theta=dispersion)
                     loss = -nb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
-                        count_dict[time_step] = dec_mean
+                        count_dict[time_step] = dec_mean.detach().cpu()
                     else:
                         torch.manual_seed(42)
                         x_pred = nb_distribution.sample((n_samples,))
-                        count_dict[time_step] = x_pred.mean(dim=0)
+                        count_dict[time_step] = x_pred.mean(dim=0).detach().cpu()
             total_loss += loss
         return total_loss, count_dict
 
@@ -939,12 +945,12 @@ class CountDecoderTrainer(LightningModule):
         true_counts_key: str,
         time_steps: list[str],
         res_dict: dict[str, list],
-        save_to_cpu: bool = False,
+        save_to_cpu: bool = True,
     ) -> tuple[float, dict[str, list[Any]]]:
         total_mse = 0.0
         for time_step in time_steps:
             pred_count = pred_counts[time_step]
-            true_count = batch[f'{true_counts_key}_t{time_step}']
+            true_count = batch[f'{true_counts_key}_t{time_step}'].detach().cpu()
             # MSE
             mse = self.mse(pred_count, true_count)
             total_mse += mse
@@ -996,7 +1002,7 @@ class CountDecoderTrainer(LightningModule):
             # return Pearson correlation coefficient
             true_counts = torch.cat(self.train_dict['true_counts'])
             pred_counts = torch.cat(self.train_dict['pred_counts'])
-            # Pearson correlation coefficient
+            # # Pearson correlation coefficient
             mean_pearson = pearson(pred_counts=pred_counts, true_counts=true_counts)
             self.log(
                 'train/pearson',
@@ -1007,8 +1013,8 @@ class CountDecoderTrainer(LightningModule):
                 sync_dist=True,
             )
             # set to status quo
-            self.train_true_counts_list = []
-            self.train_pred_counts_list = []
+            self.train_dict['true_counts'] = []
+            self.train_dict['pred_counts'] = []
 
     def validation_step(self, batch, *args, **kwargs):
         outputs, _ = self.forward(batch)

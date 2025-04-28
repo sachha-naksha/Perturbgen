@@ -230,6 +230,7 @@ def get_args():
         '--cond_list',
         nargs='+',
         type=str,
+        default=None,
         help='List of variables to form condition tokens',
     )
     parser.add_argument(
@@ -559,7 +560,7 @@ def main() -> None:
         dirpath=checkpoint_path,
         filename=f'{filename}-' + '{epoch:02d}',
         save_top_k=-1,
-        every_n_epochs=5,
+        every_n_epochs=10,
         verbose=True,
         monitor=monitor_metric,
         mode=mode,
