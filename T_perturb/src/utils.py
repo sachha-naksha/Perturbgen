@@ -787,6 +787,7 @@ def return_generation_adata(
     obs_key: list,
     output_dir: str,
     file_name: str,
+    aggregate: bool = True,
 ):
     """
     Description:
@@ -823,6 +824,7 @@ def return_generation_adata(
     # adata.X
     if 'pred_counts' in test_dict.keys():
         pred_counts = torch.cat(test_dict['pred_counts']).numpy()
+
     # adata.layers['counts']
     if 'true_counts' in test_dict.keys():
         true_counts = torch.cat(test_dict['true_counts']).numpy()
@@ -831,6 +833,12 @@ def return_generation_adata(
     # adata.obs
     obs_dict = {obs: np.concatenate(test_dict[obs]) for obs in obs_key}
     test_obs = pd.DataFrame(obs_dict)
+
+    if (aggregate is True) and ('cell_idx' in test_obs.columns):
+        pred_counts = mean_duplicates(test_obs, pred_counts)
+        true_counts = mean_duplicates(test_obs, true_counts)
+        cls_embeddings = mean_duplicates(test_obs, cls_embeddings)
+        test_obs = test_obs.drop_duplicates(subset='cell_idx')
     # create adata
     if 'pred_counts' in test_dict.keys() and 'true_counts' in test_dict.keys():
         adata = ad.AnnData(
@@ -846,6 +854,8 @@ def return_generation_adata(
         )
     if 'true_embeddings' in test_dict.keys():
         true_embeddings = torch.cat(test_dict['true_embeddings']).numpy()
+        if aggregate is True:
+            true_embeddings = mean_duplicates(test_obs, true_embeddings)
         adata.obsm['true_embeddings'] = true_embeddings
     adata.write_h5ad(os.path.join(output_dir, file_name))
     print('anndata generation completed---')
@@ -1097,9 +1107,14 @@ def pearson(
     # mean_pearson = torch.mean(pearson_output)
     x_true = np.average(true_counts, axis=1)
     x_pred = np.average(pred_counts, axis=1)
+    print(f'x_true: {x_true.shape}')
+    print(f'x_true: {x_true}')
+    print(f'x_pred: {x_pred.shape}')
+    print(f'x_pred: {x_pred}')
     print(f'Pearson correlation: {np.corrcoef(x_true, x_pred)[0, 1]}')
     _, _, r_value, _, _ = stats.linregress(x_true, x_pred)
     pearson_r = r_value**2
+    raise
     return pearson_r
 
 

@@ -28,6 +28,7 @@ from T_perturb.Modules.T_model import CountDecoder, CytoMeister
 from T_perturb.src.losses import mse_loss
 from T_perturb.src.metric import (
     compute_distribution_distances,
+    compute_emd,
     evaluate_emd,
     evaluate_mmd,
     lin_reg_summary,
@@ -905,7 +906,7 @@ class CountDecoderTrainer(LightningModule):
                     .mean()
                     .float()
                 )
-                count_dict[time_step] = count_ouput['count_lognorm'].detach().cpu()
+                count_dict[time_step] = count_ouput['count_lognorm']
             elif self.loss_mode in ['zinb', 'nb']:
                 dec_mean = count_ouput['count_mean'] * batch_size_factor.expand_as(
                     count_ouput['count_mean']
@@ -919,22 +920,22 @@ class CountDecoderTrainer(LightningModule):
                     )
                     loss = -zinb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
-                        count_dict[time_step] = dec_mean.detach().cpu()
+                        count_dict[time_step] = dec_mean
                     else:
                         # sample from distribution
                         torch.manual_seed(42)
                         x_pred = zinb_distribution.sample((n_samples,))
-                        count_dict[time_step] = x_pred.mean(dim=0).detach().cpu()
+                        count_dict[time_step] = x_pred.mean(dim=0)
 
                 elif self.loss_mode == 'nb':
                     nb_distribution = NegativeBinomial(mu=dec_mean, theta=dispersion)
                     loss = -nb_distribution.log_prob(true_values).sum(dim=-1).mean()
                     if n_samples == 1:
-                        count_dict[time_step] = dec_mean.detach().cpu()
+                        count_dict[time_step] = dec_mean
                     else:
                         torch.manual_seed(42)
                         x_pred = nb_distribution.sample((n_samples,))
-                        count_dict[time_step] = x_pred.mean(dim=0).detach().cpu()
+                        count_dict[time_step] = x_pred.mean(dim=0)
             total_loss += loss
         return total_loss, count_dict
 
@@ -945,12 +946,12 @@ class CountDecoderTrainer(LightningModule):
         true_counts_key: str,
         time_steps: list[str],
         res_dict: dict[str, list],
-        save_to_cpu: bool = True,
+        save_to_cpu: bool = False,
     ) -> tuple[float, dict[str, list[Any]]]:
         total_mse = 0.0
         for time_step in time_steps:
             pred_count = pred_counts[time_step]
-            true_count = batch[f'{true_counts_key}_t{time_step}'].detach().cpu()
+            true_count = batch[f'{true_counts_key}_t{time_step}']
             # MSE
             mse = self.mse(pred_count, true_count)
             total_mse += mse
@@ -1002,11 +1003,23 @@ class CountDecoderTrainer(LightningModule):
             # return Pearson correlation coefficient
             true_counts = torch.cat(self.train_dict['true_counts'])
             pred_counts = torch.cat(self.train_dict['pred_counts'])
-            # # Pearson correlation coefficient
-            mean_pearson = pearson(pred_counts=pred_counts, true_counts=true_counts)
+            # mean_pearson = pearson(pred_counts=pred_counts, true_counts=true_counts)
+            # random sample 10000 or max number of samples
+            if len(pred_counts) > 10000:
+                random_ids = torch.randint(
+                    low=0,
+                    high=len(pred_counts),
+                    size=(10000,),
+                    generator=torch.Generator().manual_seed(42),
+                ).tolist()
+            else:
+                random_ids = torch.arange(len(pred_counts)).tolist()
+            pred_counts = pred_counts[random_ids]
+            true_counts = true_counts[random_ids]
+            emd = compute_emd(pred_counts, true_counts)
             self.log(
-                'train/pearson',
-                mean_pearson,
+                'train/emd',
+                emd,
                 on_epoch=True,
                 prog_bar=True,
                 logger=True,
@@ -1183,7 +1196,7 @@ class CountDecoderTrainer(LightningModule):
                     f't{self.pred_tps}_{self.encoder}_s{self.seed}_'
                     f'l{self.loss_mode}_n{self.n_samples}'
                     f'_p{self.pos_encoding_mode}_'
-                    f'm{self.mask_scheduler}_s{self.sequence_length}'
+                    f'm{self.mask_scheduler}_s{self.sequence_length}.h5ad'
                 ),
             )
             # save metrics
@@ -1239,7 +1252,8 @@ class CountDecoderTrainer(LightningModule):
             metrics.to_csv(
                 f'{self.output_dir}/{self.date}_p{self.pos_encoding_mode}_'
                 f'm{self.mask_scheduler}_t{self.temperature}_i{self.iterations}'
-                f'_s{self.seed}_s{self.sequence_length}_metrics.csv'
+                f'_s{self.seed}_s{self.sequence_length}'
+                f'n{self.n_samples}_metrics.csv'
             )
 
         else:
