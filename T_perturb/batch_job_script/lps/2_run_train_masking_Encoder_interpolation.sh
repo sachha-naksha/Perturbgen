@@ -1,7 +1,7 @@
 #make a date directory if it does not exist
 #!/bin/bash
 #BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=shared:num=2' # request for exclusive access to gpu
+#BSUB -gpu 'mode=exclusive_process:num=2' # request for exclusive access to gpu
 #BSUB -n 4 # number of cores
 #BSUB -R "span[ptile=4]"     # split X cores per host
 #BSUB -G team361 # groupname for billing
@@ -43,7 +43,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --mapping_dict_path "/lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb/T_perturb/pp/res/2k_hvg_ourMED_all_tps/token_id_to_genename_2000_hvg.pkl" \
 --batch_size 64 \
 --max_len 666 \
---epochs 10 \
+--epochs 20 \
 --tgt_vocab_size 1990 \
 --cellgen_lr 0.0001 \
 --cellgen_wd 0.0001 \
@@ -61,6 +61,7 @@ python3 /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb
 --mask_scheduler 'pow' \
 --num_node 1 \
 --d_model 768 \
+--ckpt_masking_path /lustre/scratch126/cellgen/team361/kl11/t_generative/T_perturb/T_perturb/plt/res/lps/pbmc_median/interpolation/res/checkpoints/20250429_1512_cellgen_train_masking_lr_0.0001_wd_0.0001_batch_64_ptime_pos_sin_m_pow_tp_1-3_s_42-epoch=09.ckpt \
 --use_weighted_sampler False
 
 echo '--- Finished computing model'

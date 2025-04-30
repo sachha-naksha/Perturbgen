@@ -6,7 +6,7 @@ data:
   perturb_genes_file: 'T_perturb/T_perturb/plt/res/hspc/pbmc_median/gene_embedding/20250423/gene_clusters_L5.csv'
   perturb_colname: 'leiden_5'
   perturb_cluster:
-  - 60
+  - 61
 
 trainer:
   tgt_vocab_size: 5848

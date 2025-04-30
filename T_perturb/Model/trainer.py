@@ -53,13 +53,13 @@ from T_perturb.src.utils import (  # WarmupScheduler
 def set_matmul_precision_for_device(precision: Literal['high', 'medium'] = 'medium'):
     if torch.cuda.is_available():
         cuda_device_name = torch.cuda.get_device_name()
-        # If the device is an A100, set the precision for matrix multiplication
         if ('A100' in cuda_device_name) or ('NVIDIA H100 80GB HBM' in cuda_device_name):
             print(f'Using {cuda_device_name} for training')
             print(f'Set float32_matmul_precision to {precision}')
             torch.set_float32_matmul_precision(precision)
+
     else:
-        print('Using CPU for training')
+        print('CUDA is not available, using CPU for training.')
 
 
 class CytoMeisterTrainer(LightningModule):

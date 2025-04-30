@@ -527,7 +527,8 @@ def main() -> None:
     subset_dataset = tgt_datasets[f'tgt_dataset_t{args.pred_tps[0]}'].select(
         train_indices
     )
-    adata_idx = subset_adata.obs['index'].tolist()
+    adata_idx = subset_adata.obs['cell_pairing_index'].astype(str)
+    adata_idx = adata_idx.tolist()
     dataset_idx = list(map(str, subset_dataset['cell_pairing_index']))
     assert adata_idx == dataset_idx, (
         'Cell pairing indices do not match ' 'between AnnData and Dataset objects'
@@ -690,7 +691,6 @@ def main() -> None:
         num_nodes=args.num_node,
         devices=-1 if torch.cuda.is_available() else 0,  # inference only on one gpu
         strategy=ddp_strategy if torch.cuda.device_count() > 1 else 'auto',
-        limit_test_batches=100,
     )
     # Finally, kick of the training process.
     if args.test_mode == 'masking':

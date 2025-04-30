@@ -60,15 +60,15 @@ def get_args():
     parser.add_argument(
         '--output_dir',
         type=str,
-        # default='./T_perturb/T_perturb/plt/res/cytoimmgen',
-        default='./T_perturb/T_perturb/plt/res/eb',
+        default='./T_perturb/T_perturb/plt/res/cytoimmgen/pbmc_median',
+        # default='./T_perturb/T_perturb/plt/res/eb',
         help='store dataset name',
     )
     parser.add_argument(
         '--splitting_mode',
         type=str,
-        default='random',
-        # default='stratified',
+        # default='random',
+        default='stratified',
         choices=['random', 'stratified', 'unseen_cond'],
         help='splitting mode',
     )
@@ -76,10 +76,9 @@ def get_args():
         '--split_obs',
         type=str,
         nargs='+',
-        default=['cell_type_cellgen_harm'],
-        # default=['celltype_v2'],
+        # default=['cell_type_cellgen_harm'],
+        default=['Cell_type'],
     )
-    parser.add_argument('--split_value', type=str, default='D351')
     parser.add_argument(
         '--ckpt_masking_path',
         type=str,
@@ -130,7 +129,10 @@ def get_args():
         type=str,
         # default='./T_perturb/T_perturb/pp/res/eb/token_id_to_genename_hvg.pkl',
         # default='./T_perturb/T_perturb/pp/res/eb/token_id_to_genename_all.pkl'
-        default='./T_perturb/T_perturb/pp/res/cytoimmgen/token_id_to_genename_hvg.pkl',
+        default=(
+            'T_perturb/T_perturb/pp/res/'
+            'cytoimmgen_pbmc_median/token_id_to_genename_2000_hvg.pkl'
+        ),
     )
     parser.add_argument('--batch_size', type=int, default=64, help='batch_size')
     parser.add_argument('--num_node', type=int, default=1)
@@ -140,7 +142,7 @@ def get_args():
 
     parser.add_argument('--shuffle', type=str2bool, default=True, help='shuffle')
     parser.add_argument(
-        '--epochs', type=int, default=100, help='number of training epochs'
+        '--epochs', type=int, default=5, help='number of training epochs'
     )
     parser.add_argument(
         '--log_dir', type=str, default='logs', help='path to data directory'
@@ -150,7 +152,7 @@ def get_args():
         type=int,
         # default=300,
         # default=2048,
-        default=263,
+        default=400,
         help='max sequence length',
     )  # check how many genes there are
     parser.add_argument(
@@ -158,7 +160,7 @@ def get_args():
         type=int,
         # default=1261,
         # default=15280,
-        default=2001,
+        default=1360,
         help='vocab size (max token id + 1) in dataset for padding',
     )
     parser.add_argument(
@@ -171,11 +173,11 @@ def get_args():
     parser.add_argument(
         '--num_layers', type=int, default=6, help='number of decoder layers'
     )
-    parser.add_argument('--d_ff', type=int, default=128, help='feed forward dimension')
+    parser.add_argument('--d_ff', type=int, default=64, help='feed forward dimension')
 
     parser.add_argument('--mlm_prob', type=float, default=0.15, help='mlm probability')
     parser.add_argument(
-        '--n_workers', type=int, default=8, help='number of workers'
+        '--n_workers', type=int, default=4, help='number of workers'
     )  # 64
     parser.add_argument(
         '--loss_mode', type=str, default='zinb', help='loss mode [zinb, nb, mse]'
@@ -193,7 +195,7 @@ def get_args():
     parser.add_argument(
         '--mask_scheduler',
         type=str,
-        default='cosine',
+        default='pow',
         help='mask scheduler [cosine, exp, pow]',
     )
     parser.add_argument('--temperature', type=float, default=1.5, help='temperature')
@@ -221,8 +223,14 @@ def get_args():
         # type=list,
         nargs='+',
         type=str,
-        # default=['Time_point'],
-        default=['cell_type_cellgen_harm', 'donor_cellgen_harm', 'time_after_LPS'],
+        default=[
+            'Time_point',
+            'Cell_type',
+            'Cell_culture_batch',
+            'Cell_population',
+            'Donor',
+        ],
+        # default=['cell_type_cellgen_harm', 'donor_cellgen_harm', 'time_after_LPS'],
         # default=['celltype_v2', 'sex', 'phase', 'tissue', 'diff_state'],
         help='List of variables to keep in the dataset',
     )
@@ -245,7 +253,7 @@ def get_args():
     )
     parser.add_argument(
         '--encoder',
-        default='GF_frozen',
+        default='scmaskgit',
         type=str,
         choices=[
             'GF_fine_tuned',
@@ -257,7 +265,12 @@ def get_args():
     )
     parser.add_argument(
         '--encoder_path',
-        default=None,
+        default=(
+            '/lustre/scratch126/cellgen/team361/av13/'
+            'scmaskgit/scmaskgit/output3/checkpoints/'
+            '20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_'
+            'ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt'
+        ),
         type=str,
         help='mode of encoder',
     )
@@ -295,7 +308,7 @@ def get_args():
     parser.add_argument(
         '--d_model',
         type=int,
-        default=512,
+        default=768,
         help='embedding dimension',
     )
     parser.add_argument(
@@ -307,7 +320,7 @@ def get_args():
     parser.add_argument(
         '--use_weighted_sampler',
         type=str2bool,
-        default=True,
+        default=False,
         help='use weighted sampler',
     )
     args = parser.parse_args()
