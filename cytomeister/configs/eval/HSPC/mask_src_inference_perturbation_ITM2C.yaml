@@ -1,8 +1,8 @@
 data:
-  tgt_dataset_folder: "T_perturb/cytomeister/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt"
-  src_dataset_file: "T_perturb/cytomeister/pp/res/hspc_pbmc_median/dataset_10000_hvg_src/stem.dataset"
-  src_adata_file: "T_perturb/cytomeister/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_src/stem.h5ad"
-  tgt_adata_folder: "T_perturb/cytomeister/pp/res/hspc_pbmc_median/h5ad_pairing_10000_hvg_tgt"
+  src_dataset_file: "T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf/dataset_5000_hvg_src/intermediate.dataset"
+  tgt_dataset_folder: "T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf/dataset_5000_hvg_tgt"
+  src_adata_file: "T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf/h5ad_pairing_5000_hvg_src/intermediate.h5ad"
+  tgt_adata_folder: "T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf/h5ad_pairing_5000_hvg_tgt"
   # cond_list:
   #   - 'celltype_v2'
   #   - 'diff_state'
@@ -17,26 +17,24 @@ data:
   # - '75'
 
 trainer:
-  tgt_vocab_size: 5710
+  tgt_vocab_size: 5685
   d_model: 768
   num_heads: 8
   num_layers: 6
   d_ff: 64
-  max_seq_length: 2200
+  max_seq_length: 2275
   dropout: 0
-  mask_scheduler: 'cosine'
+  mask_scheduler: 'pow'
   output_dir: 'T_perturb/cytomeister/res/hspc/perturbation'
-  mapping_dict_path: 'T_perturb/cytomeister/pp/res/hspc_pbmc_median/token_id_to_genename_10000_hvg.pkl'
-  tokenid_to_rowid_path: 'T_perturb/cytomeister/pp/res/hspc_pbmc_median/tokenid_to_rowid_10000_hvg.pkl'
+  mapping_dict_path: 'T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf/token_id_to_genename_5000_hvg.pkl'
+  tokenid_to_rowid_path: 'T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf/tokenid_to_rowid_5000_hvg.pkl'
   encoder: 'scmaskgit'
   encoder_path: '/lustre/scratch126/cellgen/lotfollahi/av13/scmaskgit/output2/checkpoints/20250620_1508_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=07.ckpt'
-  context_mode: True
-  temperature: 1.5
-  iterations: 19
+  context_mode: False
   pos_encoding_mode: 'time_pos_sin'
   perturbation_mode: 'mask'
   genes_to_perturb:
-    - 'SPINK2'
+    - 'ITM2C'
   validation_mode: 'inference'
   perturbation_sequence:
     - 'src'
@@ -48,19 +46,17 @@ trainer:
     - 'diff_state'
   pred_tps:
     - 1
-    - 2
   #count decoder
-  use_count_decoder: true
+  use_count_decoder: True
   loss_mode: 'zinb'
   n_samples: 3
 
-
 datamodule:
-  batch_size: 64
+  batch_size: 32
   num_workers: 4
   shuffle: False
   split: False
-  max_len: 2200
+  max_len: 2275
   var_list:
     - 'sex'
     - 'phase'
@@ -69,7 +65,6 @@ datamodule:
     - 'diff_state'
   pred_tps:
     - 1
-    - 2
 model:
   precision: 16
-  ckpt_masking_path: "T_perturb/cytomeister/res/hspc/_median/checkpoints/20250326_1856_cellgen_train_count_lr_0.005_wd_0.001_batch_64_zinb_tp_1-2_s_42_pos_time_pos_sin_m_pow-epoch=09.ckpt"
+  ckpt_masking_path: "T_perturb/cytomeister/res/hspc/fine_tuning/checkpoints/20250624_1504_cellgen_train_count_lr_0.005_wd_0.001_batch_64_drop_0.0_zinb_tp_1_s_42_pos_time_pos_sin_m_pow-epoch=04.ckpt"

@@ -178,7 +178,7 @@ def get_args():
     parser.add_argument(
         '--gene_median_path',
         type=str,
-        default='/lustre/scratch126/cellgen/team361/am74/'
+        default='/lustre/scratch126/cellgen/lotfollahi/am74/'
         'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
         'Dictionaries/filtered_trace_median.pkl',
         # default='T_perturb/Geneformer/geneformer/gene_median_dictionary_gc95M.pkl',
@@ -187,7 +187,7 @@ def get_args():
     parser.add_argument(
         '--token_dict_path',
         type=str,
-        default='/lustre/scratch126/cellgen/team361/am74/'
+        default='/lustre/scratch126/cellgen/lotfollahi/am74/'
         'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
         'Dictionaries/trace_filtered_tokenid.pkl',
         # default='T_perturb/Geneformer/geneformer/token_dictionary_gc95M.pkl',
@@ -196,7 +196,7 @@ def get_args():
     parser.add_argument(
         '--gene_mapping_path',
         type=str,
-        # default='/lustre/scratch126/cellgen/team361/am74/'
+        # default='/lustre/scratch126/cellgen/lotfollahi/am74/'
         # 'Adib/TRACE/Loom_cohort/tdigest/2nd_run/'
         # 'Dictionaries/filtered_trace_median.pkl',
         default='T_perturb/Geneformer/geneformer/gene_name_id_dict_gc95M.pkl',

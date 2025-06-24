@@ -19,7 +19,7 @@ from cytomeister.tests.test_cellgen_training import dummy_dataset
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/lotfollahi/kl11/t_generative/')
 
 # initialize the logger
 csv_logger = CSVLogger(

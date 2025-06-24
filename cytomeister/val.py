@@ -14,6 +14,7 @@ from pytorch_lightning.callbacks import TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy  # DeepSpeedStrategy
 
+from cytomeister.configs import ROOT
 from cytomeister.Dataloaders.datamodule import CytoMeisterDataModule
 from cytomeister.Model.trainer import CountDecoderTrainer, CytoMeisterTrainer
 from cytomeister.src.utils import (
@@ -25,10 +26,8 @@ from cytomeister.src.utils import (
     stratified_split,
 )
 
-if os.getcwd().split('/')[-1] != 't_generative':
-    # set working directory to root of repository
-    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
-    print('Changed working directory to root of repository')
+os.chdir(ROOT)
+print(f'Current working directory: {os.getcwd()}')
 
 
 def get_args():

@@ -270,7 +270,7 @@ def get_args():
     parser.add_argument(
         '--encoder_path',
         default=(
-            '/lustre/scratch126/cellgen/team361/av13/'
+            '/lustre/scratch126/cellgen/lotfollahi/av13/'
             'scmaskgit/scmaskgit/output3/checkpoints/'
             '20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_'
             'ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt'

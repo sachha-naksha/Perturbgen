@@ -33,7 +33,7 @@ GPU_PER_HOST=$((NUM_GPUS / NUM_HOSTS))
 # activate pyenv
 # source /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/.cellgen_4096/bin/activate
 cwd=$(pwd)
-## source /lustre/scratch126/cellgen/team361/av13/scmaskgit/.venv/bin/activate
+## source /lustre/scratch126/cellgen/lotfollahi/av13/scmaskgit/.venv/bin/activate
 
 # export WANDB_DIR=$cwd/wandb
 # run script

@@ -12,7 +12,7 @@ trainer:
   max_seq_length: 2300
   dropout: 0
   mask_scheduler: 'cosine'
-  output_dir: 'T_perturb/cytomeister/plt/res/hspc/embeddings/res'
+  output_dir: 'T_perturb/cytomeister/res/hspc/ddings/res'
   mapping_dict_path: 'T_perturb/cytomeister/pp/res/hspc/token_id_to_genename_10000_hvg.pkl'
   encoder: 'GF_frozen'
   context_mode: true
@@ -52,4 +52,4 @@ datamodule:
   pred_tps:
     - 1
 model:
-  ckpt_masking_path: "T_perturb/cytomeister/plt/res/hspc/embeddings/res/checkpoints/20241114_1146_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt"
+  ckpt_masking_path: "T_perturb/cytomeister/res/hspc/ddings/res/checkpoints/20241114_1146_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_learnt_m_cosine_tp_1-2_s_42-epoch=09.ckpt"

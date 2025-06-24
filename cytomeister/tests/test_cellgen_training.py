@@ -14,7 +14,7 @@ from cytomeister.Model.trainer import CytoMeisterTrainer
 
 if os.getcwd().split('/')[-1] != 'healthy_imm_expr':
     # set working directory to root of repository
-    os.chdir('/lustre/scratch126/cellgen/team361/kl11/t_generative/')
+    os.chdir('/lustre/scratch126/cellgen/lotfollahi/kl11/t_generative/')
 
 csv_logger = CSVLogger('T_perturb/cytomeister/tests/res', name='test_cellgen_training')
 

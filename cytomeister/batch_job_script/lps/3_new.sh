@@ -6,8 +6,8 @@
 #BSUB -R "span[ptile=8]"     # split X cores per host
 #BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb # working directory
-#BSUB -o T_perturb/logs/count_interpolation_6h_out_%J.out # output file
-#BSUB -e T_perturb/logs/count_interpolation_6h_out_%J.err # error file
+#BSUB -o logs/count_interpolation_6h_out_%J.out # output file
+#BSUB -e logs/count_interpolation_6h_out_%J.err # error file
 #BSUB -M 150000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>150000] rusage[mem=150000]' # RAM memory part 1. Default: 100MB
 #BSUB -J count_interpolation # job name
@@ -15,7 +15,7 @@
 # activate pyenv
 # source /lustre/scratch123/hgi/projects/healthy_imm_expr/t_generative/.cellgen_4096/bin/activate
 cwd=$(pwd)
-## source /lustre/scratch126/cellgen/team361/av13/scmaskgit/.venv/bin/activate
+## source /lustre/scratch126/cellgen/lotfollahi/av13/scmaskgit/.venv/bin/activate
 
 # export WANDB_DIR=$cwd/wandb
 # run script

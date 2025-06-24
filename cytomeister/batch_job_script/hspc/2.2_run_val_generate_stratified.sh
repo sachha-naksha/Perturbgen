@@ -45,7 +45,7 @@ python3 /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister/val.py 
 --generate True \
 --return_attn False \
 --return_gene_embs False \
---ckpt_masking_path "T_perturb/cytomeister/plt/res/hspc/pbmc_median/checkpoints/20250123_1633_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_sin_m_cosine_tp_1-2_s_42-epoch=19.ckpt" \
+--ckpt_masking_path "T_perturb/cytomeister/res/hspc/_median/checkpoints/20250123_1633_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_sin_m_cosine_tp_1-2_s_42-epoch=19.ckpt" \
 --output_dir $RES_DIR/$RES_NAME/ \
 --src_dataset "T_perturb/cytomeister/pp/res/hspc_pbmc_median/dataset_10000_hvg_src/stem.dataset" \
 --tgt_dataset_folder "T_perturb/cytomeister/pp/res/hspc_pbmc_median/dataset_10000_hvg_tgt" \
@@ -76,10 +76,10 @@ python3 /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister/val.py 
 echo "--- Finished computing model"
 
 # PBMC median
-# --encoder_path '/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output3/checkpoints/20250113_1104_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt' \
+# --encoder_path '/lustre/scratch126/cellgen/lotfollahi/av13/scmaskgit/output2/checkpoints/20250620_1508_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=07.ckpt' \
 
 # 20k GF median
-# --encoder_path '/lustre/scratch126/cellgen/team361/av13/scmaskgit/scmaskgit/output2/checkpoints/20250110_2325_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt' \
+# --encoder_path '/lustre/scratch126/cellgen/lotfollahi/av13/scmaskgit/scmaskgit/output2/checkpoints/20250110_2325_cellgen_train_masking_lr_5e-05_wd_1e-06_batch_64_ptime_pos_sin_m_pow_tp_1-2-3_s_42-epoch=06.ckpt' \
 
 # 2k hvgs
 # --src_dataset "./T_perturb/cytomeister/pp/res/hspc/dataset_hvg_src/stem.dataset" \
