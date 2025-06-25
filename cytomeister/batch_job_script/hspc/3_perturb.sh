@@ -4,11 +4,11 @@
 #BSUB -n 4 # number of cores
 #BSUB -G team361 # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister # working directory
-#BSUB -o logs/perturb_cluster_STK17B_%J.out # output file
-#BSUB -e logs/perturb_cluster_STK17B_%J.err # error file
+#BSUB -o logs/perturb_cluster_HBG2_%J.out # output file
+#BSUB -e logs/perturb_cluster_HBG2_%J.err # error file
 #BSUB -M 50000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>50000] rusage[mem=50000]' # RAM memory part 1. Default: 100MB
-#BSUB -J hspc_perturb_cluster_STK17B # job name
+#BSUB -J hspc_perturb_cluster_HBG2 # job name
 
 # load cuda
 module load cuda-12.1.1
@@ -23,5 +23,5 @@ echo "--- Start computing model"
 
 # python3 $cwd/train.py \
 python3 /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister/Perturb/val.py \
---config T_perturb/cytomeister/configs/eval/HSPC/mask_src_inference_perturbation_STK17B.yaml
+--config T_perturb/cytomeister/configs/eval/HSPC/mask_src_inference_perturbation_HBG2.yaml
 echo "--- Completed perturbation"

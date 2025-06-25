@@ -744,7 +744,13 @@ class CountDecoderTrainer(LightningModule):
             checkpoint = torch.load(ckpt_count_path, map_location='cpu')
 
             state_dict_ = modify_ckpt_state_dict(checkpoint, 'decoder.')
-            self.decoder.load_state_dict(state_dict_, strict=False)
+            missing, unexpected = self.decoder.load_state_dict(
+                state_dict_, strict=False
+            )
+            if len(missing) > 1:
+                raise Warning(f'Missing keys in state_dict: {missing}')
+            if len(unexpected) > 1:
+                raise Warning(f'Unexpected keys in state_dict: {unexpected}')
 
         self.weight_decay = weight_decay
         self.lr = lr
