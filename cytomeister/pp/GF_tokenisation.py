@@ -41,7 +41,7 @@ def get_args():
         '--dataset',
         type=str,
         # default='cytoimmgen',
-        default='debugging',
+        default='hspc_pbmc_median_inter_tissue_all_tf',
         # choices=[
         #     'cytoimmgen',
         #     'cytoimmgen_pbmc_median',
@@ -114,7 +114,13 @@ def get_args():
         'and encoding the different states (e.g. time, hierarchy).',
     )
     parser.add_argument(
-        '--mapping_obs',
+        '--pairing_file',
+        type=str,
+        default='T_perturb/cytomeister/pp/hspc/cd34_pos_mapping.csv',
+        help='Path to cell pairing file for mapping cell types',
+    )
+    parser.add_argument(
+        '--main_pairing_obs',
         type=str,
         default='celltype_v2',
         help='Observation to use for mapping cell types in the dataset',
@@ -488,7 +494,7 @@ print('Finished tokenisation.')
 dataset = load_from_disk(f'{output_dir}/{file_name}.dataset')
 # load csv
 if args.pairing_mode == 'mapping':
-    mapping_df = pd.read_csv(f'T_perturb/cytomeister/pp/hspc/cd34_pos_mapping.csv')
+    mapping_df = pd.read_csv(args.pairing_file)
 else:
     mapping_df = None
 adata_subset = sc.read_h5ad(f'{paired_h5ad_dir}/{args.dataset}.h5ad')
@@ -498,6 +504,7 @@ cell_pairings = pairing_src_to_tgt_cells(
     pairing_mode=args.pairing_mode,
     time_obs=args.time_obs,
     seed_no=seed_no,
+    main_pairing_obs=args.main_pairing_obs, 
     mapping_df=mapping_df,
     opt_pairing_obs=args.opt_pairing_obs,
 )

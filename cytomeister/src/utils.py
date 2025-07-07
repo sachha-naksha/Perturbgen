@@ -1436,7 +1436,7 @@ def generate_pad(input_ids):
 #     adata.obs['age_group'] = adata.obs['age_group'].cat.reorder_categories(
 #         ['Fetal', 'Cord Blood', 'Pediatric', 'Young Adult', 'Middle Age', 'Aged']
 #     )
-#     adata.obs['celltype_v2'] = adata.obs['celltype_v2'].cat.reorder_categories(
+#     adata.obs[main_pairing_obs] = adata.obs[main_pairing_obs].cat.reorder_categories(
 #         [
 #             'LT-HSC',
 #             'ST-HSC',
@@ -1463,10 +1463,12 @@ def generate_pad(input_ids):
 #     return adata
 
 def group_mask(df, cols, key):
-    if isinstance(cols, (list, tuple)):
+    if len(cols) > 1:
         # Multiple columns, row-wise tuple comparison
         return df[cols].apply(tuple, axis=1) == key
     else:
+        if isinstance(cols, list):
+            cols = cols[0]
         # Single column, fast vectorized comparison
         return df[cols] == key
 
@@ -1475,6 +1477,7 @@ def pairing_src_to_tgt_cells(
     pairing_mode: Literal['random', 'stratified'],
     time_obs: str,
     seed_no: int = 42,
+    main_pairing_obs: str = 'celltype_v2',
     mapping_df: pd.DataFrame | None = None,
     opt_pairing_obs: List[str] | None = None,
 ):
@@ -1487,10 +1490,22 @@ def pairing_src_to_tgt_cells(
     -----------
     adata_subset: `~anndata.AnnData`
         Annotated data matrix subsetted to include only DEGs.
-    pairing_mode: `str`
-        Mode to pair cells. Choose between 'random' and 'stratified'.
-    seed: `int`
-        Seed for random number generator.
+    pairing_mode: `Literal['random', 'stratified', 'mapping']`
+        Mode of pairing cells. Options are:
+        - 'random': Randomly pairs cells from different time points.
+        - 'stratified': Pairs cells based on stratified sampling.
+        - 'mapping': Pairs cells based on a mapping DataFrame.
+    time_obs: `str`
+        Observation key for time points in `adata_subset.obs`.
+    seed_no: `int`
+        Seed number for random number generator to ensure reproducibility.
+    mapping_df: `pd.DataFrame | None`
+        DataFrame containing mapping information for pairing cells.
+        Required if `pairing_mode` is 'mapping'.
+    main_pairing_obs: `str`
+        Observation key in `adata_subset.obs` to use for pairing cells.
+    opt_pairing_obs: `List[str] | None`
+        Optional list of observation keys to group by when pairing cells.
 
     Returns:
     --------
@@ -1502,100 +1517,6 @@ def pairing_src_to_tgt_cells(
     adata_obs_ = adata_subset.obs.copy()
     adata_obs_ = adata_obs_.reset_index()
     cell_pairings: Dict[str, List[str]] = {}
-
-    
-
-    # if opt_pairing_obs is not None:
-    #     if pairing_mode == 'mapping':
-    #         obs_dict_opt: Dict[str, Dict[str, Dict[str, ad.AnnData]]] = {}
-    #         # initiate dict to store cell pairing
-    #         max_reference_time_opt: Dict[str, Dict[str, ad.AnnData]] = {}
-    #         adata_obs_ = adata_obs_[adata_obs_['tissue'] != 'YS']
-            
-    #         if type(opt_pairing_obs) is not list:
-    #             adata_obs_['pairing_obs'] = adata_obs_[opt_pairing_obs].copy()
-    #         else:
-    #             if len(opt_pairing_obs) > 1:
-    #                 adata_obs_['pairing_obs'] = (
-    #                     adata_obs_[opt_pairing_obs]
-    #                     .agg(lambda x: '.'.join(x.astype(str)), axis=1)
-    #                     .copy()
-    #                 )
-    #             else:
-    #                 adata_obs_['pairing_obs'] = adata_obs_[opt_pairing_obs[0]].copy()
-    #         # subset into the different lineages        
-    #         for intermediate in mapping_df['intermediate'].unique():
-    #             mapping_df_ = mapping_df[mapping_df['intermediate'] == intermediate]
-    #             # create a list of all entries in dataframe
-    #             celltypes_ = np.unique(mapping_df_.values)
-    #             obs_filter = adata_obs_.loc[
-    #                 adata_obs_['celltype_v2'].isin(celltypes_), :
-    #             ].copy()
-    #             print('pairing_obs:', obs_filter['pairing_obs'].unique())
-                
-    #             for category in obs_filter['pairing_obs'].unique():
-    #                 obs_filter_ = obs_filter.loc[
-    #                     obs_filter['pairing_obs'] == category, :
-    #                 ].copy()
-    #                 max_rows = 0
-    #                 for time in obs_filter[time_obs].unique():
-    #                     if intermediate not in obs_dict_opt.keys():
-    #                         obs_dict_opt[intermediate] = {}
-    #                     if category not in obs_dict_opt[intermediate].keys():
-    #                         obs_dict_opt[intermediate][category] = {}
-    #                     if intermediate not in max_reference_time_opt.keys():
-    #                         max_reference_time_opt[intermediate] = {}
-    #                     print(obs_dict_opt)
-
-    #                     obs_dict_opt[intermediate][category][time] = obs_filter_.loc[
-    #                         obs_filter_[time_obs] == time, :
-    #                     ]
-    #                     cell_pairings[time] = []
-    #                     # skip stem to focus on lineage
-    #                     if time == 'stem':
-    #                         continue
-    #                     else:
-    #                         # Check if this category has
-    #                         # more rows than the current maximum
-    #                         if (
-    #                             len(obs_dict_opt[intermediate][category][time])
-    #                             > max_rows
-    #                         ):
-    #                             max_rows = len(
-    #                                 obs_dict_opt[intermediate][category][time]
-    #                             )
-    #                             max_reference_time_opt[intermediate][category] = time
-
-    #         for intermediate in mapping_df['intermediate'].unique():
-    #             mapping_df_ = mapping_df[mapping_df['intermediate'] == intermediate]
-    #             # create a list of all entries in dataframe
-    #             for category in obs_filter['pairing_obs'].unique():
-    #                 max_reference_time_opt_ = max_reference_time_opt[intermediate][
-    #                     category
-    #                 ]
-    #                 obs_dict_opt_ = obs_dict_opt[intermediate][category]
-    #                 cell_pairing_idx = obs_dict_opt_[max_reference_time_opt_].index
-    #                 cell_pairings[max_reference_time_opt_].extend(cell_pairing_idx)
-    #                 n_cells_to_pair = len(cell_pairing_idx)
-    #                 for stage, obs_dict_tmp in obs_dict_opt_.items():
-    #                     if stage != max_reference_time_opt_:
-    #                         cell_to_pair = obs_dict_tmp['celltype_v2'][
-    #                             obs_dict_tmp['celltype_v2'].isin(mapping_df_[stage])
-    #                         ].index
-    #                         # only sample with replacement if needed
-    #                         if n_cells_to_pair > cell_to_pair.shape[0]:
-    #                             sample_with_replacement = True
-    #                         else:
-    #                             sample_with_replacement = False
-    #                         cell_pairings[stage].extend(
-    #                             np.random.choice(
-    #                                 cell_to_pair,
-    #                                 n_cells_to_pair,
-    #                                 replace=sample_with_replacement,
-    #                             )
-    #                         )
-    #                     else:
-    #                         continue
 
     if pairing_mode == 'mapping':
         max_rows = 0
@@ -1627,8 +1548,8 @@ def pairing_src_to_tgt_cells(
             for condition in mapping_df[max_reference_time].unique():
                 mapping_df_ = mapping_df[mapping_df[max_reference_time] == condition]
 
-                cell_to_pair = obs_ref['celltype_v2'][
-                    obs_ref['celltype_v2'].isin(mapping_df_[max_reference_time])
+                cell_to_pair = obs_ref[main_pairing_obs][
+                    obs_ref[main_pairing_obs].isin(mapping_df_[max_reference_time])
                 ].index
                 
                 cell_pairings[max_reference_time].extend(cell_to_pair)
@@ -1642,8 +1563,8 @@ def pairing_src_to_tgt_cells(
                         else:
                             obs_stage = obs_
 
-                        cell_to_pair = obs_stage['celltype_v2'][
-                            obs_stage['celltype_v2'].isin(mapping_df_[stage])
+                        cell_to_pair = obs_stage[main_pairing_obs][
+                            obs_stage[main_pairing_obs].isin(mapping_df_[stage])
                         ].index
 
                         sample_with_replacement = n_cells_to_pair > cell_to_pair.shape[0]
@@ -1652,6 +1573,7 @@ def pairing_src_to_tgt_cells(
                                 cell_to_pair,
                                 n_cells_to_pair,
                                 replace=sample_with_replacement,
+                                
                             )
                         )
                     else:
@@ -1662,16 +1584,16 @@ def pairing_src_to_tgt_cells(
         #     for condition in mapping_df[max_reference_time].unique():
         #         mapping_df_ = mapping_df[mapping_df[max_reference_time] == condition]
         #         obs_ = obs_dict[max_reference_time]
-        #         cell_to_pair = obs_['celltype_v2'][
-        #             obs_['celltype_v2'].isin(mapping_df_[max_reference_time])
+        #         cell_to_pair = obs_[main_pairing_obs][
+        #             obs_[main_pairing_obs].isin(mapping_df_[max_reference_time])
         #         ].index
         #         cell_pairings[max_reference_time].extend(cell_to_pair)
         #         n_cells_to_pair = len(cell_to_pair)
                 
         #         for stage, obs_ in obs_dict.items():
         #             if stage != max_reference_time:
-        #                 cell_to_pair = obs_['celltype_v2'][
-        #                     obs_['celltype_v2'].isin(mapping_df_[stage])
+        #                 cell_to_pair = obs_[main_pairing_obs][
+        #                     obs_[main_pairing_obs].isin(mapping_df_[stage])
         #                 ].index
         #                 # only sample with replacement if needed
         #                 if n_cells_to_pair > cell_to_pair.shape[0]:
