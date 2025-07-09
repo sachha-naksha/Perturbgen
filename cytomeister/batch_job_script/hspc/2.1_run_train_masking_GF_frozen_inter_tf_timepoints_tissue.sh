@@ -1,8 +1,8 @@
 #!/bin/bash
-#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu 'mode=exclusive_process:num=4:block=yes' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
+#BSUB -q gpu-normal # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -gpu 'mode=exclusive_process:num=4:block=yes:gmodel=NVIDIAA100_SXM4_80GB' # request for exclusive access to gpu :gmodel=NVIDIAA100_SXM4_80GB
 #BSUB -n 8 # number of cores
-#BSUB -G team361 # groupname for billing
+#BSUB -G cellulargenetics-priority # groupname for billing
 #BSUB -cwd /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister # working directory
 #BSUB -o logs/hspc_masking_%J.out # output file
 #BSUB -e logs/hspc_masking_%J.err # error file
@@ -50,7 +50,7 @@ python3 /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister/train.p
 --batch_size 64 \
 --max_len 2277 \
 --epochs 25 \
---tgt_vocab_size 5686 \
+--tgt_vocab_size 5693 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
 --mlm_prob 0.15 \

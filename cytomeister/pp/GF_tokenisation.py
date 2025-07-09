@@ -400,6 +400,7 @@ if args.gene_filtering_mode == 'hvg':
             n_top_genes=args.n_hvg,
             batch_key=args.time_obs,
         )
+        adata_subset.X = adata_subset.layers['counts']  # need raw counts
         if args.genes_to_include is not None:
             adata_subset[:, adata_subset.var['gene_name'].isin(args.genes_to_include)].var[
                 'highly_variable'

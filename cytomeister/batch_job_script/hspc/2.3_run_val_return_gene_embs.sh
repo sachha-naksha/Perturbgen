@@ -41,7 +41,7 @@ python3 /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister/val.py 
 --return_embed True \
 --return_attn False \
 --generate False \
---ckpt_masking_path "T_perturb/res/hspc/fine_tuning/checkpoints/20250623_2256_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_sin_m_pow_tp_1-2_s_42-epoch=19.ckpt" \
+--ckpt_masking_path "T_perturb/res/hspc/fine_tuning/checkpoints/20250707_2239_cellgen_train_masking_lr_1e-05_wd_1e-05_batch_64_ptime_pos_sin_m_pow_tp_1-2_s_42-epoch=19.ckpt" \
 --output_dir $RES_DIR/$RES_NAME/embeddings \
 --src_dataset "T_perturb/tokenized_data/hspc_pbmc_median_all_tissue_all_tf/dataset_5000_hvg_src/stem.dataset" \
 --tgt_dataset_folder "T_perturb/tokenized_data/hspc_pbmc_median_all_tissue_all_tf/dataset_5000_hvg_tgt" \
@@ -49,8 +49,8 @@ python3 /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister/val.py 
 --tgt_adata_folder "T_perturb/tokenized_data/hspc_pbmc_median_all_tissue_all_tf/h5ad_pairing_5000_hvg_tgt" \
 --mapping_dict_path "T_perturb/tokenized_data/hspc_pbmc_median_all_tissue_all_tf/token_id_to_genename_5000_hvg.pkl" \
 --batch_size 32 \
---max_len 2275 \
---tgt_vocab_size 5685 \
+--max_len 2277 \
+--tgt_vocab_size 5690 \
 --cellgen_lr 0.00001 \
 --cellgen_wd 0.00001 \
 --count_lr 0.00005 \
