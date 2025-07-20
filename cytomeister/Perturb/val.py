@@ -13,6 +13,7 @@ from datasets import concatenate_datasets, load_from_disk
 from cytomeister.configs import ROOT
 from cytomeister.Dataloaders.datamodule import CytoMeisterDataModule
 from cytomeister.Perturb.trainer import PerturberTrainer
+import re
 from cytomeister.src.utils import (
     condition_for_count_loss,
     get_idx_for_filtering,
@@ -85,8 +86,33 @@ def main() -> None:
         raise ValueError(
             'mapping_dict_path must be provided in data in the config file'
         )
+    # check if gene is in output folder
+    if 'output_dir' in config['trainer']:
+        # list files in output_dir
+        output_dir = config['trainer']['output_dir']
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        # read filenames in output_dir
+        files_in_output_dir = os.listdir(output_dir)
+        # check if genes_to_perturb are in the files_in_output_dir
+        genes_to_perturb = config['trainer']['genes_to_perturb']
+        
+        # Remove genes that already have a corresponding output file
+        unique_genes = []
+        for gene in genes_to_perturb:
+            pattern = re.compile(r'adata_g' + re.escape(gene) + r'_ssrc', re.IGNORECASE)
+
+        if any(pattern.search(fname) for fname in files_in_output_dir):
+            print(f"Skipping {gene} as output file already exists.")
+        else:
+            unique_genes.append(gene)
+        config['trainer']['genes_to_perturb'] = unique_genes
+    else:
+        raise ValueError('output_dir must be provided in trainer in the config file')
+
 
     # skip perturbation if no genes to perturb are provided
+    
     if len(config['trainer']['genes_to_perturb']) > 0:
         if 'loss_mode' in config['trainer']:
             if config['trainer']['loss_mode'] == 'mse':

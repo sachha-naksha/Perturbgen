@@ -1,9 +1,9 @@
 #!/bin/bash
-#BSUB -q gpu-normal # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -q gpu-parallel # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
 #BSUB -gpu "mode=exclusive_process:num=1" # request for exclusive access to gpu  :gmodel=NVIDIA_H100_HBM3_80GB
-#BSUB -J hspc_perturb_cluster_[1-6]%4 # job array with 35 jobs, max 4 running at the same time
+#BSUB -J hspc_perturb_cluster_[1-4700]%16 # job array with 1000 jobs, max 16 running at the same time
 #BSUB -n 4 # number of cores
-#BSUB -G cellulargenetics-priority # groupname for billing team361
+#BSUB -G team361 # groupname for billing team361
 #BSUB -cwd /lustre/scratch126/cellgen/lotfollahi/kl11/ # working directory
 #BSUB -o T_perturb/cytomeister/logs/perturb_cluster_DEG_%J_%I.out # output file
 #BSUB -e T_perturb/cytomeister/logs/perturb_cluster_DEG_%J_%I.err # error file
@@ -21,7 +21,7 @@ export WANDB_DIR=$cwd/wandb
 # run script
 echo "--- Start computing model"
 
-PERTURBED_GENE=$(sed -n "${LSB_JOBINDEX}p" $cwd/T_perturb/cytomeister/configs/eval/HSPC/test_100M.txt)
+PERTURBED_GENE=$(sed -n "${LSB_JOBINDEX}p" $cwd/T_perturb/cytomeister/configs/eval/HSPC/default_rest_genes.txt)
 
 echo "[$(date)] Starting job index $LSB_JOBINDEX"
 echo "Current gene to be perturbed: $PERTURBED_GENE"

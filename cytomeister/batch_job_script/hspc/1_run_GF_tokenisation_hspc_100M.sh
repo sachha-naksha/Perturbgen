@@ -18,7 +18,7 @@ echo "--- Start tokenisation"
 
 python3 $cwd/pp/GF_tokenisation.py \
 --h5ad_path '/lustre/scratch126/cellgen/lotfollahi/kl11/data/hspc/cd34.h5ad' \
---dataset hspc_pbmc_median_all_tissue_all_tf_100M \
+--dataset hspc_pbmc_median_inter_tissue_all_tf_100M \
 --var_list assignment_id sex tissue phase\
  celltype_v2 donor_tissue diff_state dataset\
  cell_pairing_index \
@@ -34,8 +34,8 @@ python3 $cwd/pp/GF_tokenisation.py \
 --n_hvg 5000 \
 --nproc 4 \
 --genes_to_include_path 'T_perturb/cytomeister/pp/hspc/1639_Human_TF.csv' \
---reference_time stem \
---time_point_order stem intermediate terminal \
+--reference_time intermediate \
+--time_point_order intermediate terminal \
 --gene_median_path '/nfs/team361/am74/Cytomeister/outputs/median_100m/aggregated_median/total1000_subsetgeneformertokenID_TRACE/median_trace_subsetgeneformertokenid.pkl' \
 --token_dict_path '/nfs/team361/am74/Cytomeister/outputs/median_100m/aggregated_median/total1000_subsetgeneformertokenID_TRACE/tokenid_trace_subsetfeneformer.pkl' \
 --gene_mapping_path '/nfs/team361/am74/Cytomeister/outputs/median_100m/aggregated_median/total1000_subsetgeneformertokenID_TRACE/ensembl_mapping_dict_gc95M.pkl'

@@ -26,6 +26,7 @@ from scipy.sparse import csr_matrix
 from torch.nn.functional import cosine_similarity
 from torch.optim import Optimizer
 from torch.utils.data import Subset
+from collections import defaultdict
 
 # from torchmetrics import PearsonCorrCoef
 
@@ -951,18 +952,18 @@ def return_perturbation_adata(
 
     # cls_cos_similarity = torch.cat(test_dict['cls_cosine_similarity']).numpy()
     mean_cos_similarity = torch.cat(test_dict['mean_cosine_similarity']).numpy()
-    if 'mean_cosine_similarity_l1' in test_dict.keys():
-        mean_cos_similarity_l1 = torch.cat(
-            test_dict['mean_cosine_similarity_l1']
-        ).numpy()
-    else:
-        mean_cos_similarity_l1 = None
-    if 'mean_cosine_similarity_lmid' in test_dict.keys():
-        mean_cos_similarity_lmid = torch.cat(
-            test_dict['mean_cosine_similarity_lmid']
-        ).numpy()
-    else:
-        mean_cos_similarity_lmid = None
+    # if 'mean_cosine_similarity_l1' in test_dict.keys():
+    #     mean_cos_similarity_l1 = torch.cat(
+    #         test_dict['mean_cosine_similarity_l1']
+    #     ).numpy()
+    # else:
+    #     mean_cos_similarity_l1 = None
+    # if 'mean_cosine_similarity_lmid' in test_dict.keys():
+    #     mean_cos_similarity_lmid = torch.cat(
+    #         test_dict['mean_cosine_similarity_lmid']
+    #     ).numpy()
+    # else:
+    #     mean_cos_similarity_lmid = None
     # delta_probs = torch.cat(test_dict['delta_probs']).numpy()
     # wasserstein_distance = np.concatenate(test_dict['wasserstein_distance'])
     # adata.varm
@@ -992,8 +993,8 @@ def return_perturbation_adata(
         pred_counts = mean_duplicates(test_obs, pred_counts)
         # cls_cos_similarity = mean_duplicates(test_obs, cls_cos_similarity)
         mean_cos_similarity = mean_duplicates(test_obs, mean_cos_similarity)
-        mean_cos_similarity_l1 = mean_duplicates(test_obs, mean_cos_similarity_l1)
-        mean_cos_similarity_lmid = mean_duplicates(test_obs, mean_cos_similarity_lmid)
+        # mean_cos_similarity_l1 = mean_duplicates(test_obs, mean_cos_similarity_l1)
+        # mean_cos_similarity_lmid = mean_duplicates(test_obs, mean_cos_similarity_lmid)
         true_cls = mean_duplicates(test_obs, true_cls)
         perturbed_cls = mean_duplicates(test_obs, perturbed_cls)
         remove_duplicates = test_obs.drop_duplicates(subset='cell_idx')
@@ -1010,8 +1011,8 @@ def return_perturbation_adata(
         'perturbed_cls': perturbed_cls,
         # 'cls_cos_similarity': cls_cos_similarity,
         'mean_cos_similarity': mean_cos_similarity,
-        'mean_cos_similarity_l1': mean_cos_similarity_l1,
-        'mean_cos_similarity_lmid': mean_cos_similarity_lmid,
+        # 'mean_cos_similarity_l1': mean_cos_similarity_l1,
+        # 'mean_cos_similarity_lmid': mean_cos_similarity_lmid,
         # 'delta_probs': delta_probs,
     }
     if mode == 'generate':
@@ -1636,32 +1637,37 @@ def pairing_src_to_tgt_cells(
                     adata_.index, len(ref_adata), replace=True
                 ).tolist()
     elif pairing_mode == 'stratified':
-        # drop Donor if they do not have Cell_type, Donor in all the Time_points
+        adata_obs_ = adata_subset.obs.reset_index()
+        cell_pairings = defaultdict(list)
+
+        grouping_obs = [main_pairing_obs] + (opt_pairing_obs if opt_pairing_obs else [])
+        total_tps = adata_obs_[time_obs].nunique()
         adata_grouped = adata_obs_[
-            adata_obs_.groupby(['cell_type_cellgen_harm'])[time_obs].transform(
-                'nunique'
-            )
-            == 4
+            adata_obs_.groupby(grouping_obs)[time_obs].transform('nunique') == total_tps
         ]
-        dropped_donors = (
-            adata_subset.obs['Donor'].nunique() - adata_grouped['Donor'].nunique()
+
+        grouped = adata_grouped.groupby(grouping_obs)
+
+        # determine reference time
+        max_reference_time = (
+            adata_obs_[time_obs].value_counts().idxmax()
         )
-        print(f'dropped {dropped_donors} donors')
-        resting_cells = adata_grouped.loc[adata_grouped[time_obs] == '0h', :]
-        grouped = adata_grouped.groupby(['Donor', 'Cell_type'])
-        for idx, resting in tqdm.tqdm(
-            resting_cells.iterrows(), total=resting_cells.shape[0]
-        ):
-            # get the indices of the other
-            # time points for the same cell type and donor
-            group = grouped.get_group((resting['Donor'], resting['Cell_type']))
-            indices_16h = group[group[time_obs] == '16h'].index
-            indices_40h = group[group[time_obs] == '40h'].index
-            indices_5d = group[group[time_obs] == '5d'].index
-            cell_pairings['0h'].append(idx)
-            cell_pairings['16h'].append(np.random.choice(indices_16h))
-            cell_pairings['40h'].append(np.random.choice(indices_40h))
-            cell_pairings['5d'].append(np.random.choice(indices_5d))
+
+        for group_key, group_df in grouped:
+            if group_df.shape[0] == 0:
+                print(f'Group {group_key} has no cells, skipping...')
+                continue
+            else:
+                group_by_time = group_df.groupby(time_obs, observed=True)
+                ref_indices = group_by_time.get_group(max_reference_time).index
+                n_samples = len(ref_indices)
+
+                for time, time_df in group_by_time:
+                    indices_ = time_df.index
+                    replace = n_samples > len(indices_)
+                    sampled = np.random.choice(indices_, n_samples, replace=replace).tolist()
+                    cell_pairings[time].extend(sampled)
+
     else:
         raise ValueError('pairing_mode must be either random or stratified')
     return cell_pairings
