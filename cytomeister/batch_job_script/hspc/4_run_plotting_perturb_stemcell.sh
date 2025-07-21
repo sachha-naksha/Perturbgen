@@ -17,8 +17,8 @@ cwd=$(pwd)
 echo "--- Start plotting"
 
 python3 /lustre/scratch126/cellgen/lotfollahi/kl11/TRACE-reproducibility/HSPC/3.1_multiple_perturbation.py \
---path 'T_perturb/res/hspc/perturbation_5k' \
---output_dir 'T_perturb/res/hspc/perturbation_5k_res' \
+--path 'T_perturb/res/hspc/perturbation_stem' \
+--output_dir 'T_perturb/res/hspc/perturbation_stem_res' \
 --p_val_adj_threshold 0.05 \
 --logfc_threshold 0.25 \
 --perturb_genes_file 'T_perturb/res/hspc/perturbation/intermediate_top250_rank_genes_groups.csv' \

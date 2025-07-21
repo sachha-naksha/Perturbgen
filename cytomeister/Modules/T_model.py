@@ -511,17 +511,31 @@ class scmaskgitwrapper(nn.Module):
         super(scmaskgitwrapper, self).__init__()
         if model_path is None:
             raise ValueError('Model path is required for scmaskgit encoder')
-
-        self.model = scmoscf(
-            # tgt_vocab_size=26717,
-            tgt_vocab_size=19000,  # PBMC median
-            d_model=768,
-            num_heads=8,
-            num_layers=12,
-            d_ff=96,
-            max_seq_length=4096,
-            dropout=0.03,
-        )
+        # how can I check if model path contains foundation_107m
+        if 'foundation_107m' in model_path:
+            self.model = scmoscf(
+                # tgt_vocab_size=20274,
+                tgt_vocab_size=19000,  # PBMC median
+                d_model=768,
+                num_heads=8,
+                num_layers=12,
+                # num_layers=6,
+                d_ff=96,
+                max_seq_length=4096,
+                dropout=0.03,
+            )
+        elif 'output2' in model_path:
+            self.model = scmoscf(
+                tgt_vocab_size=20274,
+                # tgt_vocab_size=19000,  # PBMC median
+                d_model=768,
+                num_heads=8,
+                # num_layers=12,
+                num_layers=6,
+                d_ff=96,
+                max_seq_length=4096,
+                dropout=0.03,
+            )
         pretrained_dict = torch.load(model_path, map_location='cpu', weights_only=True)
         if 'state_dict' in pretrained_dict:
             pretrained_dict = pretrained_dict['state_dict']

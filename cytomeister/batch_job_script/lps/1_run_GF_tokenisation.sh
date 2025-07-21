@@ -1,31 +1,38 @@
 #make a date directory if it does not exist
 #!/bin/bash
-#BSUB -q gpu-lotfollahi # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
-#BSUB -gpu "mode=shared:num=1" # request for exclusive access to gpu
-#BSUB -n 16 # number of cores
-#BSUB -G team361 # groupname for billing
-#BSUB -cwd /lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb # working directory
-#BSUB -o T_perturb/log/random_pairing_GF_tokenisation_%J.out # output file
-#BSUB -e T_perturb/log/random_pairing_GF_tokenisation_%J.err # error file
+#BSUB -q normal # name of the partition to run job on (options: gpu-normal, gpu-huge, gpu-lotfollahi)
+#BSUB -n 8 # number of cores
+#BSUB -G cellulargenetics-priority # groupname for billing
+#BSUB -cwd /lustre/scratch126/cellgen/lotfollahi/kl11/T_perturb/cytomeister # working directory
+#BSUB -o logs/GF_tokenisation_lps_%J.out # output file
+#BSUB -e logs/GF_tokenisation_lps_%J.err # error file
 #BSUB -M 40000  # RAM memory part 2. Default: 100MB
 #BSUB -R 'select[mem>40000] rusage[mem=40000]' # RAM memory part 1. Default: 100MB
-#BSUB -J random_pairing_GF_tokenisation # job name
+#BSUB -J GF_tokenisation_lps # job name
 
 # activate python environment
+source /nfs/team361/cytomeister/.cytomeister/bin/activate
 cwd=$(pwd)
 
 echo '--- Start tokenisation'
 
-python3 /lustre/scratch126/cellgen/team298/dv8/trace_paper/trace_final/T_perturb/cytomeister/pp/GF_tokenisation.py \
---h5ad_path '/lustre/scratch126/cellgen/team298/dv8/trace_paper/lps_data/concatenated_lps_data_dv.h5ad' \
---dataset 2k_hvg_ourMED_all_tps_butNormal \
+python3 $cwd/pp/GF_tokenisation.py \
+--h5ad_path '/nfs/team361/am74/Cytomeister/Evaluation_datasets/LPS/full_lps_new.h5ad' \
+--dataset lps_100M \
 --gene_filtering_mode hvg \
---var_list cell_type_cellgen_harm donor_cellgen_harm time_after_LPS cell_pairing_index  \
+--cell_gene_filter False \
+--remove_mito_ribo_genes False \
+--hvg_mode 'before_tokenisation' \
+--var_list cell_pairing_index time_after_LPS cell_type_harmonized \
 --pairing_mode stratified \
---pairing_obs time_after_LPS \
+--main_pairing_obs 'cell_type_harmonized' \
+--time_obs time_after_LPS \
+--reference_time 'normal' \
+--time_point_order 'normal' '90m_LPS' '6h_LPS' '10h_LPS' \
 --nproc 8 \
 --n_hvg 2000 \
---gene_median_path '/nfs/team361/am74/Cytomeister/outputs/median/aggregate/scenario_3/median_trace_scenario3.pkl' \
---token_dict_path '/nfs/team361/am74/Cytomeister/outputs/median/aggregate/scenario_3/tokenid_trace_scenario3.pkl' \
+--gene_median_path '/nfs/team361/am74/Cytomeister/outputs/median_100m/aggregated_median/total1000_subsetgeneformertokenID_TRACE/median_trace_subsetgeneformertokenid.pkl' \
+--token_dict_path '/nfs/team361/am74/Cytomeister/outputs/median_100m/aggregated_median/total1000_subsetgeneformertokenID_TRACE/tokenid_trace_subsetfeneformer.pkl' \
+--gene_mapping_path '/nfs/team361/am74/Cytomeister/outputs/median_100m/aggregated_median/total1000_subsetgeneformertokenID_TRACE/ensembl_mapping_dict_gc95M.pkl' \
 
 echo '--- Finished tokenisation'

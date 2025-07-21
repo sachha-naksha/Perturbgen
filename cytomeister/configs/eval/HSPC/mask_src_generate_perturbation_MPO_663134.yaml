@@ -25,7 +25,7 @@ trainer:
   max_seq_length: 2248
   dropout: 0
   mask_scheduler: 'pow'
-  output_dir: 'T_perturb/res/hspc/perturbation'
+  output_dir: 'T_perturb/res/hspc/perturbation_100M'
   mapping_dict_path: 'T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf_100M/token_id_to_genename_5000_hvg.pkl'
   tokenid_to_rowid_path: 'T_perturb/tokenized_data/hspc_pbmc_median_inter_tissue_all_tf_100M/tokenid_to_rowid_5000_hvg.pkl'
   encoder: 'scmaskgit'
@@ -34,7 +34,7 @@ trainer:
   pos_encoding_mode: 'time_pos_sin'
   perturbation_mode: 'mask'
   genes_to_perturb:
-    - 'DNTT'
+    - MPO
   validation_mode: 'inference'
   perturbation_sequence:
     - 'src'
