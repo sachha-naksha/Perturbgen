@@ -300,3 +300,7 @@ yarl = "1.18.3"
 zipp = "3.21.0"
 rouge-score = "^0.1.2"
 
+[tool.poetry.group.docs.dependencies]
+sphinx = "^8.2.3"
+sphinx-rtd-theme = "^3.0.2"
+
