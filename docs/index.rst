@@ -25,6 +25,12 @@ documentation for details.
    tutorial
 
 .. toctree::
+   :maxdepth: 1
+   :caption: Development
+
+   docs-development
+
+.. toctree::
    :maxdepth:2
    :caption: API
    
