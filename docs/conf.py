@@ -20,7 +20,6 @@ author = 'Dikshita'
 
 extensions = [
 	"sphinx.ext.apidoc",  
-	"sphinx.ext.viewcode",
     	"sphinx.ext.autodoc",
     	"sphinx.ext.napoleon"	]
 
