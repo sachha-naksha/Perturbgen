@@ -40,5 +40,13 @@ html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 
 apidoc_modules = [
-    {"path": "../cytomeister", "destination": "apidoc/cytomeister"},
+    {
+        "path": "../cytomeister",
+        "destination": "apidoc/cytomeister",
+        "exclude_patterns": [
+            "../cytomeister/Model",
+            "../cytomeister/Modules",
+            "../cytomeister/configs",
+        ],
+    },
 ]

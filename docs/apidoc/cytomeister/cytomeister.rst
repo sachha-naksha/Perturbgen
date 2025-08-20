@@ -1,16 +1,6 @@
 cytomeister package
 ===================
 
-Subpackages
------------
-
-.. toctree::
-   :maxdepth: 4
-
-   cytomeister.Model
-   cytomeister.Modules
-   cytomeister.configs
-
 Submodules
 ----------
 
