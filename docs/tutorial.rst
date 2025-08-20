@@ -4,7 +4,7 @@ Tutorial
 Examples
 --------
 
-Jupyter notebooks outlining the basic usage of Cytomeister:
+Jupyter notebooks outlining the basic usage of PerturbGen:
 
 - https://github.com/Lotfollahi-lab/TRACE-reproducibility/blob/main/IV_LPS/Pre-Process%20-%20LPS%20data.ipynb
 - https://github.com/Lotfollahi-lab/TRACE-reproducibility/blob/main/IV_LPS/gene_embeddigs_tutorial.ipynb

@@ -38,7 +38,6 @@ PerturbGen is structured as an installable Python package, so installing the dep
 
 You can then run the ``perturbgen`` command:
 
-
 .. code:: shell-session
 
    $ perturbgen
