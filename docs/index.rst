@@ -34,4 +34,4 @@ documentation for details.
    :maxdepth: 2
    :caption: API
 
-   apidoc/perturbgen/modules
+   apidoc/cytomeister/modules
