@@ -24,6 +24,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.doctest",
     "sphinx_rtd_theme",
+    "myst_nb",
 ]
 
 
@@ -50,3 +51,5 @@ apidoc_modules = [
         ],
     },
 ]
+
+nb_execution_mode = "off"
