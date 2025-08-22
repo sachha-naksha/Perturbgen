@@ -10,8 +10,8 @@ sys.path.insert(0, os.path.abspath('..'))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'perturbgen'
-copyright = '2025, Dikshita'
-author = 'Dikshita'
+copyright = '2025 GRL'
+author = 'Genome Research Limited'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
