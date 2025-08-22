@@ -8,8 +8,9 @@ import pandas as pd
 import scanpy as sc
 import tqdm
 from datasets import load_from_disk
-from geneformer import TranscriptomeTokenizer
+# from geneformer import TranscriptomeTokenizer
 from scipy.sparse import csr_matrix, issparse
+from cytomeister.pp.tokenizer.py
 
 from cytomeister.src.utils import (  # tokenid_mapping,;
     filter_adata_for_GF_genes,
