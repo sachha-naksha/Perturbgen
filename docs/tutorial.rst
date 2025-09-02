@@ -8,7 +8,8 @@ Jupyter notebooks outlining the basic usage of PerturbGen:
 
 .. toctree::
 
-   examples/task_0_embeddings
+   examples/Gene Embedding Analysis
+   examples/Post Perturbation Analysis
    examples/gene_embeddings_90min_LPS_1364_genes
    examples/Pre-Process - LPS data
 
