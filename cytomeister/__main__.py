@@ -47,7 +47,7 @@ def main():
 def tokenise(args):
     """Data preprocessing, tokenisation"""
     click.echo("loading, please wait...")
-    from cytomeister.pp.GF_tokenisation import main
+    from perturbgen.pp.GF_tokenisation import main
     main(args)
 
 
@@ -62,7 +62,7 @@ def tokenize(args):
 def train_mask(args):
     """Training the masking model"""
     click.echo("loading, please wait...")
-    from cytomeister.train import main
+    from perturbgen.train import main
     main(args)
 
 
@@ -71,7 +71,7 @@ def train_mask(args):
 def train_decoder(args):
     """Training the count decoder model"""
     click.echo("loading, please wait...")
-    from cytomeister.train import main
+    from perturbgen.train import main
     main(args)
 
 
@@ -80,7 +80,7 @@ def train_decoder(args):
 def generate(args):
     """Load checkpoint and generate predictions"""
     click.echo("loading, please wait...")
-    from cytomeister.val import main
+    from perturbgen.val import main
     main(args)
 
 
