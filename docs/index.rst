@@ -13,6 +13,12 @@ PerturbGen
    installation
    tutorial
 
+See Also
+--------
+
+- `GitHub repo <https://github.com/Lotfollahi-lab/Perturbgen>`__
+- `Hugging Face repo <https://huggingface.co/lotfollahi-lab/PerturbGen/tree/main>`__
+
 .. toctree::
    :maxdepth: 1
    :caption: Development
