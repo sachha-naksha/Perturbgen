@@ -42,12 +42,12 @@ html_static_path = ['_static']
 
 apidoc_modules = [
     {
-        "path": "../cytomeister",
-        "destination": "apidoc/cytomeister",
+        "path": "../perturbgen",
+        "destination": "apidoc/perturbgen",
         "exclude_patterns": [
-            "../cytomeister/Model",
-            "../cytomeister/Modules",
-            "../cytomeister/configs",
+            "../perturbgen/Model",
+            "../perturbgen/Modules",
+            "../perturbgen/configs",
         ],
     },
 ]

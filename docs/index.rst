@@ -23,4 +23,4 @@ PerturbGen
    :maxdepth: 2
    :caption: API
 
-   apidoc/cytomeister/modules
+   apidoc/perturbgen/modules
