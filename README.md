@@ -2,38 +2,36 @@
  ![python](https://img.shields.io/badge/Python-3.10-brightgreen)
 
 
-# TRACE: Temporal Reconstruction of Cellular Events
+# PerturbGen Foundation model for dynamic cellular states
 
 ## 1. Usage
 
 First, clone the repo and change to the project directory.
 
 ```shell
-git clone git@github.com:Lotfollahi-lab/T_perturb.git
+git clone https://github.com/Lotfollahi-lab/Perturbgen.git
 ```
 
-It is recommended to install the required dependencies in a separate environment, e.g.
-via `conda`.
-A simpler alternative is a virtual environment, which is created and activated with:
-
+Install Poetry (one-time):
+(wanna know what is poetry? have a look at https://python-poetry.org)
 ```shell
-python -m venv .venv
-source .venv/bin/activate
+curl -sSL https://install.python-poetry.org | python3 -
+```
+Optional: alternative way to install poetry using pipx (https://pipx.pypa.io/stable/installation/)
+```shell
+pipx install poetry
 ```
 
-Dependencies are then installed via `pip`.
-
+Create/install the environment and dependencies:
 ```shell
-pip install -r requirements.txt
+cd Perturbgen
+poetry env use python3.11
+poetry install
 ```
 
-The `TRACE` project is structured like a python package, which has the advantage of
-being able to **install** it and thus reuse modules or functions without worrying about
-absolute filepaths.
-An editable version of `TRACE` is also installed over `pip`:
-
+Activate the enviroment
 ```shell
-pip install -e .
+source "$(poetry env info -p)/bin/activate"
 ```
 
 The project contains some jupyter notebooks, which were converted to python files
@@ -44,31 +42,19 @@ These files end with `_nb.py` and can be converted back to a `.ipynb` file with
 ```shell
 jupytext --to ipynb --execute <your_file>_nb.py
 ```
+## Examples
 
-The model can be run by following the four different steps:
+For usage, see:
+- [Preprocessing and data curation](docs/examples/01_preprocessing_and_curation.ipynb)
+- [Tokenizing transcriptomes and training the model](docs/examples/02_tokenize_and_train.ipynb)
+- [In silico perturbation and analyses](docs/examples/03_analysis.ipynb)
+
+The model can be run ALSO by following the three different steps:
 1. Data preprocessing, tokenisation
 2. Training the masking model
 3. Training the count decoder model
 4. Load checkpoint and generate predictions
 The executable scripts for each step are located in the `T_perturb/cytomeister/batch_job_script` directory.
-
-Below is an example of how to run the model on the T cell dataset:
-```shell
-bash ./T_perturb/perturbgen/batch_job_script/cytoimmgen/1_run_GF_tokenisation.sh
-```
-
-```shell
-bash ./T_perturb/perturbgen/batch_job_script/cytoimmgen/2_run_train_masking_GF_frozen_interpolation.sh
-```
-
-```shell
-bash ./T_perturb/perturbgen/batch_job_script/cytoimmgen/3_run_train_count_GF_frozen_interpolation.sh
-```
-
-```shell
-bash ./T_perturb/perturbgen/batch_job_script/cytoimmgen/4_run_val_generate_interpolation.sh
-```
-
 
 
 ## Citation
