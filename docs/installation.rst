@@ -50,13 +50,7 @@ These files end with `_nb.py` and can be converted back to a `.ipynb` file with
 ## Examples
 
 For usage, see:
-- [Preprocessing and data curation](docs/examples/01_preprocessing_curation.ipynb)
-- [Tokenization and pairing](docs/examples/02_tokenization_pairing.ipynb)
-- [Train PerturbGen](docs/examples/03_train_perturbgen.ipynb)
-- [Gene Embedding Extraction](docs/examples/04_GeneEmbedding_Extraction.ipynb)
-- [Gene Program Discovery](docs/examples/05_GeneProgram_Discovery.ipynb)
-- [Perturbation](docs/examples/06_perturbation.ipynb)
-- [Post Perturbation Analyses](docs/examples/07_PostPerturbation_Analyses.ipynb)
+Examples in readme
 
 PerturbGen is structured as an installable Python package, so installing the dependencies is easy:
 
