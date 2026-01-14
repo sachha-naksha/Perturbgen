@@ -4,6 +4,8 @@
 
 # PerturbGen Foundation model for dynamic cellular states
 
+![PerturbGen overview](docs/fig1.png)
+
 ## 1. Usage
 
 First, clone the repo and change to the project directory.
