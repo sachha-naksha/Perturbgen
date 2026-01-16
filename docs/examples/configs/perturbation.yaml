@@ -40,7 +40,7 @@ trainer:
     - "cell_type_harmonized" 
     - "cell_pairing_index"
     - "time_after_LPS"
-  pred_tps: # time points to predict/ perturb
+  pred_tps: # time points to predict
     - 1
     - 2
 
